@@ -1,0 +1,20 @@
+{
+    "Appointment Context": {
+        "Client Relationship": "Long-term client",
+        "State of Mind": "Overwhelmed"
+    },
+    "Demographics": {
+        "Age": "Adult (35-64 years)",
+        "Occupation": "Construction worker",
+        "Support System": "Lives with friends"
+    },
+    "Description": "Your custom persona",
+    "Hearing Health Information": {
+        "Duration of Hearing Loss": ">10 years",
+        "Hearing Loss Severity": "Moderate"
+    },
+    "Psychological Traits": {
+        "Demeanour": "Very talkative",
+        "General Health Outlook": "Avoidant"
+    }
+}

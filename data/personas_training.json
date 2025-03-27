@@ -1,0 +1,107 @@
+{
+    "Emily": {
+        "Description": "A young teacher, has recently noticed hearing difficulties and is proactive about seeking solutions.",
+        "Demographics": {
+            "Age": "33 years",
+            "Gender": "Female",
+            "Occupation": "Teacher",
+            "Support System": "Lives with friends",
+            "Hobbies": "Music",
+            "Financial Position": "Budget-conscious"
+        },
+        "Hearing Health Information": {
+            "Hearing Loss Severity": "Mild-Moderate",
+            "Duration of hearing loss": "<5 years",
+            "Cause of hearing loss": "Unknown",
+            "Hearing Devices": "None",
+            "Prior Experience with Hearing Aids":"None",
+            "Eligibility for Govt-funded Hearing Services": "Ineligible"
+        },
+        "Psychological Traits": {
+            "Personality Type": "Pragmatic",
+            "Demeanour":"Anxious",
+            "General Health Outlook":"Proactive",
+            "Conscientiousness":"Goal-oriented", 
+            "Decision-making Style":"Decisive",
+            "Reaction to Hearing Issues":"Distressed"
+        },
+        "Appointment Context": {
+            "Initiative for appointment": "Self-initiated",
+            "Client relationship": "New Client",
+            "State of mind": "Hopeful",
+            "Communication style":"Over-sharer", 
+            "Attitude Towards Treatment":"OCurious but cautious",
+            "Technical Proficiency":"Average"
+        }
+    },
+    "David": {
+        "Description": "An engineer in his 50s, has experienced moderate hearing loss for 7 years, skeptical about hearing aids.",
+        "Demographics": {
+            "Age": "55 years",
+            "Gender": "Male",
+            "Occupation": "Engineer",
+            "Support System": "Lives with partner",
+            "Hobbies": "Hiking",
+            "Financial Position": "Cost-conscious but Value-oriented"
+        },
+        "Hearing Health Information": {
+            "Hearing Loss Severity": "Moderate",
+            "Duration of hearing loss": "7 years",
+            "Cause of hearing loss": "Noise exposure",
+            "Hearing Devices": "None",
+            "Prior Experience with Hearing Aids":"Tried but discontinued",
+            "Eligibility for Govt-funded Hearing Services": "Ineligible"
+        },
+        "Psychological Traits": {
+            "Personality Type": "Stubborn",
+            "Demeanour":"Inflexible",
+            "General Health Outlook":"Indifferent",
+            "Conscientiousness":"Forgetful", 
+            "Decision-making Style":"Analytical",
+            "Reaction to Hearing Issues":"Neutral"
+        },
+        "Appointment Context": {
+            "Initiative for appointment": "Encouraged by spouse",
+            "Client relationship": "New Client at different practice",
+            "State of mind": "In denial",
+            "Communication style":"Guarded", 
+            "Attitude Towards Treatment":"Resistant",
+            "Technical Proficiency":"Tech-savvy"
+        }
+    },
+    "Jan": {
+        "Description": "Retired, has been coping with mod-severe hearing loss for over a decade, overwhelmed by new technology.",
+        "Demographics": {
+            "Age": "77 years",
+            "Gender": "Female",
+            "Occupation": "Retired",
+            "Support System": "Lives alone",
+            "Hobbies": "Gardening",
+            "Financial Position": "Budget-conscious"
+        },
+        "Hearing Health Information": {
+            "Hearing Loss Severity": "Mod-severe",
+            "Duration of hearing loss": "12 years",
+            "Cause of hearing loss": "Aging",
+            "Hearing Devices": "Entry-Level hearing aids",
+            "Prior Experience with Hearing Aids":"Regular user, moderately satisfiedr",
+            "Eligibility for Govt-funded Hearing Services": "Pensioner"
+        },
+        "Psychological Traits": {
+            "Personality Type": "Pessimistic",
+            "Demeanour":"Very quiet",
+            "General Health Outlook":"Avoidant",
+            "Conscientiousness":"Follows instructions", 
+            "Decision-making Style":"Decisive",
+            "Reaction to Hearing Issues":"Concerned"
+        },
+        "Appointment Context": {
+            "Initiative for appointment": "Referred by doctor",
+            "Client relationship": "Long-term Client",
+            "State of mind": "Overwhelmed",
+            "Communication style":"Reserved", 
+            "Attitude Towards Treatment":"Skeptical about tech",
+            "Technical Proficiency":"Tech-adverse"
+        }
+    }
+}

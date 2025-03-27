@@ -1,0 +1,14 @@
+{
+  "dblocal": "",
+  "db2": "",
+  "db": "",
+  "DB_NAME":"work_win",
+  "port": 3000,
+  "host": "",
+  "serverProtocal": "http",
+  "ENABLE_EMAIL": true,
+  "EnableLog": false,
+  "ENVIRONMENT": "DEV",
+  "jwtSecret": "b2a9c7e9af8348b8a9bba8f69b6e7aeb5de7f8699e2d73a3f4c9b17fd8a7e8cb"
+}
+

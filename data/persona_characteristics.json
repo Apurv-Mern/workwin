@@ -1,0 +1,46 @@
+[
+    {
+        "category": "Demographics",
+        "data": [
+            ["Age", ["Young Adult (26-34 years)", "Adult (35-64 years)", "Senior (65+ years)"]],
+            ["Gender", ["Male", "Female", "Other"]],
+            ["Occupation", ["Teacher", "Engineer", "Construction worker", "Retired"]],
+            ["Support System", ["Lives alone", "Lives with partner", "Lives with friends", "Lives with family"]],
+            ["Hobbies", ["Music", "Golf", "Gardening", "Hiking"]],
+            ["Financial Position", ["Budget-conscious", "Cost-conscious but Value-oriented", "Money is no concern"]]
+        ]
+    },
+    {
+        "category": "Hearing Health Information",
+        "data": [
+            ["Hearing Loss Severity", ["No loss", "Mild", "Mild-Moderate", "Moderate", "Severe"]],
+            ["Duration of Hearing Loss",["Since childhood", "<5 years", ">10 years"]],
+            ["Cause of Hearing Loss",["Aging", "Noise Exposure","Genetic","Trauma"]],
+            ["Hearing Devices", ["No devices", "OTC Hearing devices", "Entry-level Hearing Aids", "High-Tech Hearing Aids"]],
+            ["Prior Experience with Hearing Aids", ["None", "Tried but discontinued", "Regular user, seeking improvement", "Satisfied user"]],
+            ["Eligibility for Govt-funded Hearing Services", ["Ineligible", "Pensioner", "Complex Needs", "Indigenous"]]
+        ]
+    },
+    {
+        "category": "Psychological Traits",
+        "data": [
+            ["Personality Type", ["Optimistic", "Pragmatic", "Pessimistic", "Stubborn"]],
+            ["Demeanour", ["Calm", "Anxious", "Very quiet", "Very talkative"]],
+            ["General Health Outlook", ["Proactive", "Reactive", "Indifferent", "Avoidant"]],
+            ["Conscientiousness", ["Goal-oriented", "Diligent in care", "Forgetful"]],
+            ["Decision-making Style", ["Decisive", "Dependent on others", "Impulsive", "Analytical"]],  
+            ["Reaction to Hearing Issues", ["Distressed", "Concerned", "Accepting","Neutral"]]     
+        ]
+    },
+    {
+        "category": "Appointment Context",
+        "data": [
+            ["Initiative for Appointment", ["Self-initiated", "Encouraged by family", "Referred by healthcare provider"]],
+            ["Client Relationship", ["New client", "Returning Client <2 years", "Long-term client"]],
+            ["State of Mind", ["In denial", "Frustrated", "Hopeful", "Overwhelmed"]],
+            ["Communication style", ["Reserved", "Guarded", "Over-sharer"]],
+            ["Attitude Towards Treatment", ["Open and receptive", "Curious but cautious", "Skeptical but willing to try", "Resistant"]],        
+            ["Technical Proficiency", ["Tech-savvy", "Average", "Technophobic"]]  
+        ]
+    }
+]
