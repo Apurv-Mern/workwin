@@ -1,37 +1,53 @@
-var DataTypes = require("sequelize").DataTypes;
-var _permissions = require("./permissions");
-var _role_permissions = require("./role_permissions");
-var _roles = require("./roles");
-var _sequelizemeta = require("./sequelizemeta");
-var _user_roles = require("./user_roles");
-var _users = require("./users");
+const Sequelize = require("sequelize");
+const DataTypes = Sequelize.DataTypes;
+
+const _Permissions = require("./Permissions");
+const _RolePermissions = require("./RolePermissions");
+const _Roles = require("./Roles");
+const _Sequelizemeta = require("./Sequelizemeta");
+const _UserRoles = require("./UserRoles");
+const _Users = require("./Users");
+const _Session = require("./Session");
 
 function initModels(sequelize) {
-  var permissions = _permissions(sequelize, DataTypes);
-  var role_permissions = _role_permissions(sequelize, DataTypes);
-  var roles = _roles(sequelize, DataTypes);
-  var sequelizemeta = _sequelizemeta(sequelize, DataTypes);
-  var user_roles = _user_roles(sequelize, DataTypes);
-  var users = _users(sequelize, DataTypes);
+  const Permissions = _Permissions.init(sequelize, DataTypes);
+  const RolePermissions = _RolePermissions.init(sequelize, DataTypes);
+  const Roles = _Roles.init(sequelize, DataTypes);
+  const Sequelizemeta = _Sequelizemeta.init(sequelize, DataTypes);
+  const UserRoles = _UserRoles.init(sequelize, DataTypes);
+  const Users = _Users.init(sequelize, DataTypes);
+  const Session = _Session.init(sequelize, DataTypes);
 
-  role_permissions.belongsTo(permissions, { as: "permission", foreignKey: "permissionId"});
-  permissions.hasMany(role_permissions, { as: "role_permissions", foreignKey: "permissionId"});
-  role_permissions.belongsTo(roles, { as: "role", foreignKey: "roleId"});
-  roles.hasMany(role_permissions, { as: "role_permissions", foreignKey: "roleId"});
-  user_roles.belongsTo(roles, { as: "role", foreignKey: "roleId"});
-  roles.hasMany(user_roles, { as: "user_roles", foreignKey: "roleId"});
-  user_roles.belongsTo(users, { as: "user", foreignKey: "userId"});
-  users.hasMany(user_roles, { as: "user_roles", foreignKey: "userId"});
+
+  // Define relationships
+  RolePermissions.belongsTo(Permissions, { as: "permission", foreignKey: "permissionId" });
+  Permissions.hasMany(RolePermissions, { as: "role_permissions", foreignKey: "permissionId" });
+
+  RolePermissions.belongsTo(Roles, { as: "role", foreignKey: "roleId" });
+  Roles.hasMany(RolePermissions, { as: "role_permissions", foreignKey: "roleId" });
+
+  UserRoles.belongsTo(Roles, { as: "role", foreignKey: "roleId" });
+  Roles.hasMany(UserRoles, { as: "user_roles", foreignKey: "roleId" });
+
+  UserRoles.belongsTo(Users, { as: "user", foreignKey: "userId" });
+  Users.hasMany(UserRoles, { as: "user_roles", foreignKey: "userId" });
+
+  // Optional: Add M:N association helpers (needed for includes)
+  Users.belongsToMany(Roles, { through: UserRoles, foreignKey: "userId", otherKey: "roleId", as: "Roles" });
+  Roles.belongsToMany(Users, { through: UserRoles, foreignKey: "roleId", otherKey: "userId", as: "Users" });
+
+  Roles.belongsToMany(Permissions, { through: RolePermissions, foreignKey: "roleId", otherKey: "permissionId", as: "Permissions" });
+  Permissions.belongsToMany(Roles, { through: RolePermissions, foreignKey: "permissionId", otherKey: "roleId", as: "Roles" });
 
   return {
-    permissions,
-    role_permissions,
-    roles,
-    sequelizemeta,
-    user_roles,
-    users,
+    Permissions,
+    RolePermissions,
+    Roles,
+    Sequelizemeta,
+    UserRoles,
+    Users,
+    Session
   };
 }
+
 module.exports = initModels;
-module.exports.initModels = initModels;
-module.exports.default = initModels;
