@@ -8,6 +8,11 @@ const _Sequelizemeta = require("./Sequelizemeta");
 const _UserRoles = require("./UserRoles");
 const _Users = require("./Users");
 const _Session = require("./Session");
+const _UserXpLog = require("./UserXpLog");
+const _UserLevel = require("./UserLevel");
+const _UserAttribute = require("./UserAttribute");
+const _LevelDefinition = require("./LevelDefinition");
+
 
 function initModels(sequelize) {
   const Permissions = _Permissions.init(sequelize, DataTypes);
@@ -17,6 +22,10 @@ function initModels(sequelize) {
   const UserRoles = _UserRoles.init(sequelize, DataTypes);
   const Users = _Users.init(sequelize, DataTypes);
   const Session = _Session.init(sequelize, DataTypes);
+  const UserXpLog = _UserXpLog.init(sequelize, DataTypes);
+  const UserLevel = _UserLevel.init(sequelize, DataTypes);
+  const UserAttribute = _UserAttribute.init(sequelize, DataTypes);
+  const LevelDefinition = _LevelDefinition.init(sequelize, DataTypes);
 
 
   // Define relationships
@@ -38,6 +47,8 @@ function initModels(sequelize) {
 
   Roles.belongsToMany(Permissions, { through: RolePermissions, foreignKey: "roleId", otherKey: "permissionId", as: "Permissions" });
   Permissions.belongsToMany(Roles, { through: RolePermissions, foreignKey: "permissionId", otherKey: "roleId", as: "Roles" });
+  UserLevel.belongsTo(LevelDefinition, { foreignKey: 'level', targetKey: 'level', as: 'LevelDefinition' });
+
 
   return {
     Permissions,
@@ -46,7 +57,11 @@ function initModels(sequelize) {
     Sequelizemeta,
     UserRoles,
     Users,
-    Session
+    Session,
+    UserXpLog,
+    UserLevel,
+    UserAttribute,
+    LevelDefinition
   };
 }
 

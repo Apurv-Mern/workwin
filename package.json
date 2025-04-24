@@ -27,23 +27,20 @@
     "mongoose": "^8.10.0",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.14.0",
+    "nodemailer": "^6.10.0",
     "openai": "^4.76.1",
     "sequelize": "^6.37.6",
     "sequelize-cli": "^6.6.2",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "tiktoken": "^1.0.18"
   },
   "nodemonConfig": {
     "watch": [
       "index.js",
       "src/"
-    ],
-    "ignore": [
-      "data/",
-      "logs/",
-      "*.txt",
-      "*.json"
-    ],
-    "ext": "js,json"
+    ]
+    
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

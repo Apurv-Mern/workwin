@@ -6,6 +6,9 @@ let protcol = config.get("serverProtocal");
 // const sessionModel = require('./models/Session');
 const fs = require("fs");
 const compression = require("compression");
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsDoc = require('swagger-jsdoc');
+
 if (protcol == "https") {
     httpsOptions = module.exports = {
        key: fs.readFileSync("/var/www/ssl_files/ssl_24.key"),
@@ -15,15 +18,47 @@ if (protcol == "https") {
     console.log('httpsOptions :>> ', httpsOptions);
     console.log("https Server Started2");
     server = require("https").createServer(httpsOptions, app);
-    // console.log("http Server Started382");
-    // server = require("https").createServer(app);
 } else {
     console.log("http Server Started3");
     server = require("http").createServer(app);
 };
+
 const { connectToDatabase } = require("./startup/database");
 connectToDatabase();
+
+// Add this to parse form bodies like newPassword, confirmPassword
+app.use(express.urlencoded({ extended: true })); // ✅ Add this line
+app.use(express.json()); // optional, good for parsing JSON bodies
+
+// Swagger definition
+const swaggerOptions = {
+    swaggerDefinition: {
+        openapi: "3.0.0",
+        info: {
+            title: "API Documentation",
+            version: "1.0.0",
+            description: "API Information",
+        },
+        servers: [
+            {
+                url: "http://localhost:3008",
+            },
+        ],
+    },
+    apis: ["./routes/v1/user/*.js"], // Path to the API docs
+};
+
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
 require("./startup/routes")(app);
+
+app.get('/reset-password', (req, res) => {
+    const token = req.query.token;
+    const html = fs.readFileSync(path.join(__dirname, "./views/password-reset.html"), "utf8");
+    const htmlWithToken = html.replace("{{token}}", token);
+    res.send(htmlWithToken);
+});
 
 app.use(compression({ flush: require('zlib').Z_SYNC_FLUSH }));
 
@@ -35,19 +70,7 @@ app.get("/test1", (req, res) => {
     res.status(200).send("0OK");
 });
 
-
-// Catch-all route for React app AFTER static files and API routes
-// app.get('*', (req, res) => {
-//   if (req.originalUrl.startsWith('/api/')) {
-//     return res.status(404).json({ error: 'API route not found' });
-//   } else if (req.originalUrl.startsWith('/public/')) {
-//     // Serve static files in /public
-//     res.sendFile(path.join(__dirname, req.originalUrl));
-//   } else {
-//     res.sendFile(path.join(__dirname, 'build', 'index.html'));
-//   }
-// });
 const PORT = 3008;
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });

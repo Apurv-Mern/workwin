@@ -20,7 +20,22 @@ class Users extends Model {
       },
       password: {
         type: DataTypes.STRING(255),
-        allowNull: false
+        allowNull: false,
+      },
+      totalUserXp: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+        defaultValue: 0
+      },
+      curr_levels: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 1
+      },
+      userCode: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        defaultValue: null
       },
       status: {
         type: DataTypes.ENUM('active', 'inactive'),
