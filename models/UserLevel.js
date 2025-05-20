@@ -8,6 +8,11 @@ class UserLevel extends Model {
         allowNull: false,
         unique: true
       },
+      userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        unique: true
+      },
       totalXp: {
         type: DataTypes.INTEGER,
         allowNull: false,

@@ -32,6 +32,11 @@ class Users extends Model {
         allowNull: true,
         defaultValue: 1
       },
+      employerCode: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        defaultValue: null
+      },
       userCode: {
         type: DataTypes.STRING(255),
         allowNull: true,

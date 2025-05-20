@@ -1,3 +1,4 @@
+const { UserLevel, Users, LevelDefinition } = require('../models/init-models')(require('../models').sequelize);
 function successObj(message, result) {
     if (isObject(result)) {
         return {
@@ -123,6 +124,18 @@ function errorResponseObjNew(message, error, code = 000000) {
     };
 }
 
+// const getActiveSeason = async () => {
+//     const today = new Date().toISOString().split('T')[0];
+//     const season = await Season.findOne({
+//       where: {
+//         start_date: { [Op.lte]: today },
+//         end_date: { [Op.gte]: today },
+//         status: 1 // or 'started'
+//       }
+//     });
+//     return season;
+//   };
+
 
 module.exports = {
     successObj: successObj,
@@ -132,5 +145,6 @@ module.exports = {
     successResponseOBJ: successResponseOBJ,
     successResponseOBJNew:successResponseOBJNew,
     errorResponseObjNew:errorResponseObjNew,
-    errorResponseObj: errorResponseObj
+    errorResponseObj: errorResponseObj,
+    getActiveSeason:getActiveSeason
 }

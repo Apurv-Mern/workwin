@@ -101,7 +101,7 @@ const upload = multer({
 router.post('/user_signup', async (req, res) => {
   const { name, email, password ,employerCode } = req.body;
   try {
-    if (!email || !password || !name || employerCode) {
+    if (!email || !password || !name || !employerCode) {
       return res.status(401).send(HelperUtils.errorObj("Name, email, employer code and password are required"));
     }
     //Check if employerCode exists
