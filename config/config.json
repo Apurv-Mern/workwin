@@ -1,7 +1,7 @@
 {
   "development": {
     "username": "root",
-    "password": null,
+    "password": "root",
     "database": "work_win",
     "host": "127.0.0.1",
     "dialect": "mysql"
@@ -14,10 +14,10 @@
     "dialect": "mysql"
   },
   "production": {
-    "username": "root",
-    "password": null,
-    "database": "database_production",
-    "host": "127.0.0.1",
+    "username": "workwin",
+    "password": "3TWdzdiQkuB9kZS",
+    "database": "workwin",
+    "host": "localhost",
     "dialect": "mysql"
   }
 }
