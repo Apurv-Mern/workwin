@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { Navbar, Nav, Container, Button, Dropdown } from "react-bootstrap";
-// import useAuth from "../hooks/useAuth";
-import { hasPermissionEnhanced, hasRole } from "../utils/permissions";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import { logout } from "../store/slices/authSlice";
+import { usePermissions } from "../utils/handlePermissions";
 
 // Type assertion for Link buttons
 const LinkNavItem = Nav.Link as any;
@@ -14,6 +13,7 @@ const AdminLayout: React.FC = () => {
   const location = useLocation();
   const { user } = useAppSelector((state) => state.auth);
   const dispatch = useAppDispatch();
+  const { hasPermission } = usePermissions();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     window.innerWidth < 992
@@ -152,19 +152,36 @@ const AdminLayout: React.FC = () => {
                 Dashboard
               </span>
             </LinkNavItem>
-
-            <LinkNavItem
-              as={Link}
-              to="/users"
-              className={`py-3 ${
-                location.pathname.startsWith("/users")
-                  ? "active bg-primary text-white"
-                  : ""
-              }`}
-            >
-              <i className="bi bi-people me-3"></i>
-              <span className={sidebarCollapsed ? "d-none" : ""}>Users</span>
-            </LinkNavItem>
+            {hasPermission("user.read") && (
+              <LinkNavItem
+                as={Link}
+                to="/users"
+                className={`py-3 ${
+                  location.pathname.startsWith("/users")
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
+              >
+                <i className="bi bi-people me-3"></i>
+                <span className={sidebarCollapsed ? "d-none" : ""}>Users</span>
+              </LinkNavItem>
+            )}
+            {hasPermission("role.view") && (
+              <LinkNavItem
+                as={Link}
+                to="/role/management"
+                className={`py-3 ${
+                  location.pathname === "/role/management"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
+              >
+                <i className="bi bi-trophy me-3"></i>
+                <span className={sidebarCollapsed ? "d-none" : ""}>
+                  Role Management
+                </span>
+              </LinkNavItem>
+            )}
 
             <LinkNavItem
               as={Link}
@@ -215,12 +232,6 @@ const AdminLayout: React.FC = () => {
                   ? "active bg-primary text-white"
                   : ""
               }`}
-              style={{
-                display:
-                  user && hasPermissionEnhanced(user, "set_kpi_metrics")
-                    ? ""
-                    : "none",
-              }}
             >
               <i className="bi bi-sliders me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -228,22 +239,18 @@ const AdminLayout: React.FC = () => {
               </span>
             </LinkNavItem>
 
-            {user && hasRole(user, "super-admin") && (
-              <LinkNavItem
-                as={Link}
-                to="/settings"
-                className={`py-3 ${
-                  location.pathname === "/settings"
-                    ? "active bg-primary text-white"
-                    : ""
-                }`}
-              >
-                <i className="bi bi-gear me-3"></i>
-                <span className={sidebarCollapsed ? "d-none" : ""}>
-                  Settings
-                </span>
-              </LinkNavItem>
-            )}
+            <LinkNavItem
+              as={Link}
+              to="/settings"
+              className={`py-3 ${
+                location.pathname === "/settings"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
+            >
+              <i className="bi bi-gear me-3"></i>
+              <span className={sidebarCollapsed ? "d-none" : ""}>Settings</span>
+            </LinkNavItem>
           </Nav>
 
           <div className="mt-auto p-3 border-top d-none d-lg-block">

@@ -7,6 +7,8 @@ import PublicRoute from "./PublicRoute";
 // Lazy load the components
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Login = lazy(() => import("../pages/Login"));
+const Users = lazy(() => import("../pages/Users"));
+const RoleManagement = lazy(() => import("../pages/RoleManagement"));
 
 // Loading fallback
 const LoadingFallback = () => (
@@ -42,8 +44,8 @@ const AppRoutes = () => {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
-          {/* <Route path="users" element={<Users />} /> */}
-          {/* <Route path="users/:id" element={<UserDetail />} /> */}
+          <Route path="users" element={<Users />} />
+          <Route path="role/management" element={<RoleManagement />} />
         </Route>
 
         {/* Fallback route */}

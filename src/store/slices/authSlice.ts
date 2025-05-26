@@ -47,7 +47,18 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isAuthenticated = true;
-        state.user = action.payload?.result;
+
+        let userWithRole = action.payload?.result;
+        if (
+          userWithRole &&
+          userWithRole.Roles &&
+          userWithRole.Roles.length > 0
+        ) {
+          userWithRole = { ...userWithRole, role: userWithRole.Roles[0].name };
+        } else {
+          userWithRole = { ...userWithRole, role: "" };
+        }
+        state.user = userWithRole;
         // Ensure permissions are defined
         if (state.user && !state.user.permissions) {
           state.user.permissions = [];
@@ -55,7 +66,7 @@ const authSlice = createSlice({
         state.token = action.payload.token;
 
         localStorage.setItem("token", action.payload?.result?.token);
-        localStorage.setItem("user", JSON.stringify(action.payload.result));
+        localStorage.setItem("user", JSON.stringify(userWithRole));
       })
       .addCase(login.rejected, (state, action) => {
         state.isLoading = false;
