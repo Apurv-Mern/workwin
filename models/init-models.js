@@ -12,7 +12,7 @@ const _UserXpLog = require("./UserXpLog");
 const _UserLevel = require("./UserLevel");
 const _UserAttribute = require("./UserAttribute");
 const _LevelDefinition = require("./LevelDefinition");
-
+const _Weights = require("./Weights");
 
 function initModels(sequelize) {
   const Permissions = _Permissions.init(sequelize, DataTypes);
@@ -26,14 +26,23 @@ function initModels(sequelize) {
   const UserLevel = _UserLevel.init(sequelize, DataTypes);
   const UserAttribute = _UserAttribute.init(sequelize, DataTypes);
   const LevelDefinition = _LevelDefinition.init(sequelize, DataTypes);
-
+  const Weights = _Weights.init(sequelize, DataTypes);
 
   // Define relationships
-  RolePermissions.belongsTo(Permissions, { as: "permission", foreignKey: "permissionId" });
-  Permissions.hasMany(RolePermissions, { as: "role_permissions", foreignKey: "permissionId" });
+  RolePermissions.belongsTo(Permissions, {
+    as: "permission",
+    foreignKey: "permissionId",
+  });
+  Permissions.hasMany(RolePermissions, {
+    as: "role_permissions",
+    foreignKey: "permissionId",
+  });
 
   RolePermissions.belongsTo(Roles, { as: "role", foreignKey: "roleId" });
-  Roles.hasMany(RolePermissions, { as: "role_permissions", foreignKey: "roleId" });
+  Roles.hasMany(RolePermissions, {
+    as: "role_permissions",
+    foreignKey: "roleId",
+  });
 
   UserRoles.belongsTo(Roles, { as: "role", foreignKey: "roleId" });
   Roles.hasMany(UserRoles, { as: "user_roles", foreignKey: "roleId" });
@@ -42,13 +51,36 @@ function initModels(sequelize) {
   Users.hasMany(UserRoles, { as: "user_roles", foreignKey: "userId" });
 
   // Optional: Add M:N association helpers (needed for includes)
-  Users.belongsToMany(Roles, { through: UserRoles, foreignKey: "userId", otherKey: "roleId", as: "Roles" });
-  Roles.belongsToMany(Users, { through: UserRoles, foreignKey: "roleId", otherKey: "userId", as: "Users" });
+  Users.belongsToMany(Roles, {
+    through: UserRoles,
+    foreignKey: "userId",
+    otherKey: "roleId",
+    as: "Roles",
+  });
+  Roles.belongsToMany(Users, {
+    through: UserRoles,
+    foreignKey: "roleId",
+    otherKey: "userId",
+    as: "Users",
+  });
 
-  Roles.belongsToMany(Permissions, { through: RolePermissions, foreignKey: "roleId", otherKey: "permissionId", as: "Permissions" });
-  Permissions.belongsToMany(Roles, { through: RolePermissions, foreignKey: "permissionId", otherKey: "roleId", as: "Roles" });
-  UserLevel.belongsTo(LevelDefinition, { foreignKey: 'level', targetKey: 'level', as: 'LevelDefinition' });
-
+  Roles.belongsToMany(Permissions, {
+    through: RolePermissions,
+    foreignKey: "roleId",
+    otherKey: "permissionId",
+    as: "Permissions",
+  });
+  Permissions.belongsToMany(Roles, {
+    through: RolePermissions,
+    foreignKey: "permissionId",
+    otherKey: "roleId",
+    as: "Roles",
+  });
+  UserLevel.belongsTo(LevelDefinition, {
+    foreignKey: "level",
+    targetKey: "level",
+    as: "LevelDefinition",
+  });
 
   return {
     Permissions,
@@ -61,7 +93,8 @@ function initModels(sequelize) {
     UserXpLog,
     UserLevel,
     UserAttribute,
-    LevelDefinition
+    LevelDefinition,
+    Weights,
   };
 }
 

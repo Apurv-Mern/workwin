@@ -1,29 +1,27 @@
 const router = require("express").Router();
-const moment = require("moment");
 const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions, UserRoles, RolePermissions } =
-  ModelsData;
+const {
+  Users,
+  Session,
+  Roles,
+  Permissions,
+  UserRoles,
+  RolePermissions,
+  Weights,
+} = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
-// const HelperOpenAi = require("./../../../utils/openAiHelper");
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = config.get("jwtSecret");
-const { Sequelize } = require("sequelize");
 const adminAuthMiddleware = require("../../../middleware/adminAuthMiddleware");
 const checkPermission = require("../../../middleware/checkPermission");
-const fs = require("fs/promises");
-const path = require("path");
-const { DateTime } = require("luxon");
-const multer = require("multer");
-const fsData = require("fs");
-const axios = require("axios");
-const FormData = require("form-data");
-const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
 const TOKEN_EXPIRY = "1d";
 const { Op } = require("sequelize");
+const upload = require("../../../middleware/fileUpload");
+const XLSX = require("xlsx");
 
 router.post("/admin_login", async (req, res) => {
   const { email, password } = req.body;
@@ -1043,7 +1041,7 @@ router.get("/employers", adminAuthMiddleware, async (req, res) => {
     const employers = await Users.findAll({
       where: {
         employerCode: {
-          [Op.ne]: null, // fetch where employerCode is NOT NULL
+          [Op.ne]: null,
         },
       },
     });
@@ -1059,4 +1057,190 @@ router.get("/employers", adminAuthMiddleware, async (req, res) => {
   }
 });
 
+// Get All Users with Employer Code
+router.get(
+  "/users-with-employer-code/:employerCode",
+  adminAuthMiddleware,
+  async (req, res) => {
+    try {
+      const { employerCode } = req.params;
+      if (!employerCode) {
+        return res
+          .status(400)
+          .send(HelperUtils.errorObj("Employer code is required"));
+      }
+      const users = await Users.findAll({
+        where: {
+          userCode: {
+            [Op.eq]: employerCode,
+          },
+        },
+      });
+
+      res
+        .status(200)
+        .send(
+          HelperUtils.successObj(
+            "Users with Employer Code fetched successfully",
+            users
+          )
+        );
+    } catch (err) {
+      console.error("Error fetching users with employer code:", err);
+      res.status(500).send(HelperUtils.errorObj("Unable to fetch users"));
+    }
+  }
+);
+
+// Save User Weights
+router.post("/users/weights", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { attendance, punctuality, shift_compliance, consistency } = req.body;
+
+    const existingWeights = await Weights.findOne();
+
+    let attributes;
+
+    if (existingWeights) {
+      attributes = await existingWeights.update({
+        attendance,
+        punctuality,
+        shift_compliance,
+        consistency,
+      });
+    } else {
+      attributes = await Weights.create({
+        attendance,
+        punctuality,
+        shift_compliance,
+        consistency,
+      });
+    }
+
+    res
+      .status(200)
+      .send(
+        HelperUtils.successObj(
+          existingWeights
+            ? "Weights updated successfully"
+            : "Weights created successfully",
+          attributes
+        )
+      );
+  } catch (err) {
+    console.error("Error saving weights:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to save weights"));
+  }
+});
+
+// Get User Weights
+router.get("/users/weights", adminAuthMiddleware, async (req, res) => {
+  try {
+    const attributes = await Weights.findAll();
+
+    res
+      .status(200)
+      .send(
+        HelperUtils.successObj("Attributes fetched successfully", attributes)
+      );
+  } catch (err) {
+    console.error("Error fetching user attributes:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to fetch attributes"));
+  }
+});
+
+// XP Calculation Logic
+const calculateXP = (row) => {
+  const weights = {
+    attendance: 0.3,
+    punctuality: 0.2,
+    completion: 0.2,
+    consistency: 0.3,
+  };
+  console.log({ row });
+  // Calculate each attribute score as percentage (0-100)
+  const attendanceScore =
+    (row["Attendance Approved Shifts"] || 0) / (row["Expected Shifts"] || 1);
+  const punctualityScore =
+    (row["Punctuality On-Time Shifts"] || 0) / (row["Approved Shifts"] || 1);
+  const completionScore =
+    (row["Shift Completion Completed Shifts"] || 0) /
+    (row["Assigned Shifts"] || 1);
+  const consistencyScore =
+    (row["Consistency (Streaks) Streak Days"] || 0) /
+    (row["Max Possible Streak"] || 1);
+
+  // Calculate weighted XP (capped at 50)
+  const xp =
+    50 *
+    (weights.attendance * attendanceScore +
+      weights.punctuality * punctualityScore +
+      weights.completion * completionScore +
+      weights.consistency * consistencyScore);
+
+  return Math.min(50, Math.round(xp));
+};
+
+// Excel upload Calculation
+router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No file uploaded" });
+    }
+
+    const filePath = req.file.path;
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+      header: 1,
+    });
+    console.log({ rawData });
+    // Process headers - combine main and subheaders
+    const headers = rawData[0].map((h, i) => {
+      const mainHeader = h || "";
+      const subHeader = rawData[1][i] || "";
+      return `${mainHeader} ${subHeader}`.trim();
+    });
+
+    // Process user data
+    const users = rawData
+      .slice(2)
+      .filter((row) => row[0])
+      .map((row) => {
+        const userData = Object.fromEntries(
+          row.map((value, index) => [headers[index], value])
+        );
+
+        return {
+          name: userData["Name"],
+          email: userData["Email"],
+          xp: calculateXP(userData),
+        };
+      });
+
+    // Save users to the users_attributes table
+
+    // Clean up - delete the uploaded file after processing
+    // fs.unlinkSync(filePath);
+
+    res.status(200).json({
+      success: true,
+      users,
+      formula: "XP = 50 × ∑(Wᵢ × (Attribute Scoreᵢ / 100))",
+      weights: {
+        attendance: 0.3,
+        punctuality: 0.2,
+        completion: 0.2,
+        consistency: 0.3,
+      },
+    });
+  } catch (err) {
+    console.error("Error:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to process Excel file" });
+  }
+});
 module.exports = router;

@@ -1,45 +1,43 @@
 const { Model, DataTypes } = require("sequelize");
 
-class UserAttribute extends Model {
+class Weights extends Model {
   static init(sequelize) {
     return super.init(
       {
-        userId: {
+        id: {
+          autoIncrement: true,
           type: DataTypes.INTEGER,
           allowNull: false,
-        },
-        date: {
-          type: DataTypes.DATEONLY,
-          allowNull: false,
+          primaryKey: true,
         },
         attendance: {
-          type: DataTypes.INTEGER,
+          type: DataTypes.DOUBLE,
+          allowNull: false,
           defaultValue: 0,
         },
         punctuality: {
-          type: DataTypes.INTEGER,
+          type: DataTypes.DOUBLE,
+          allowNull: false,
           defaultValue: 0,
         },
         shift_completion: {
-          type: DataTypes.INTEGER,
+          type: DataTypes.DOUBLE,
+          allowNull: false,
           defaultValue: 0,
         },
         consistency: {
-          type: DataTypes.INTEGER,
-          defaultValue: 0,
-        },
-        ownership: {
-          type: DataTypes.INTEGER,
+          type: DataTypes.DOUBLE,
+          allowNull: false,
           defaultValue: 0,
         },
       },
       {
         sequelize,
-        tableName: "user_attributes",
+        tableName: "weights",
         timestamps: true,
       }
     );
   }
 }
 
-module.exports = UserAttribute;
+module.exports = Weights;
