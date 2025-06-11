@@ -3,9 +3,15 @@ import type { PayloadAction } from "@reduxjs/toolkit";
 import type { createUserInterface, User } from "../../types/Permission";
 import {
   CreateUsers,
+  DeleteUsersByIdRequest,
   EditUsersById,
   GetAllUsersRequest,
   GetEmployerRequest,
+  getLeaderBoardRequest,
+  getUserWeightRequest,
+  postUserExcelUploadRequest,
+  postUserWeightRequest,
+  UserWithEmployerRequest,
 } from "../Api/requests";
 
 interface UserState {
@@ -13,6 +19,9 @@ interface UserState {
   isLoading: boolean;
   error: string | null;
   employer: [];
+  usersWithEmployerCode: [];
+  userWeights: [];
+  leaderBoard: [];
 }
 
 const initialState: UserState = {
@@ -20,6 +29,9 @@ const initialState: UserState = {
   isLoading: false,
   error: null,
   employer: [],
+  usersWithEmployerCode: [],
+  userWeights: [],
+  leaderBoard: [],
 };
 
 export const createUsers = createAsyncThunk(
@@ -55,11 +67,82 @@ export const editUsersById = createAsyncThunk(
     }
   }
 );
+
+export const DeleteUsersById = createAsyncThunk(
+  "users/deleteUsers",
+  async (id: number, { rejectWithValue }) => {
+    try {
+      const response = await DeleteUsersByIdRequest(id);
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+
 export const GetEmployeer = createAsyncThunk(
-  "users/editUsers",
+  "users/GetEmployeer",
   async (_, { rejectWithValue }) => {
     try {
       const response = await GetEmployerRequest();
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+export const UsersWithEmployerCode = createAsyncThunk(
+  "users/UsersWithEmployerCode",
+  async (data, { rejectWithValue }) => {
+    try {
+      const response = await UserWithEmployerRequest(data);
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+
+export const GetUsersWeightsCode = createAsyncThunk(
+  "users/GetUsersWeightsCode",
+  async (id, { rejectWithValue }) => {
+    try {
+      const response = await getUserWeightRequest(id);
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+export const PostUsersWeightsCode = createAsyncThunk(
+  "users/PostUsersWeightsCode",
+  async (data: any, { rejectWithValue }) => {
+    try {
+      const response = await postUserWeightRequest(data);
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+
+export const PostUsersExcelUploadCode = createAsyncThunk(
+  "users/PostUsersWeightsCode",
+  async (data: any, { rejectWithValue }) => {
+    try {
+      console.log({ data });
+      const response = await postUserExcelUploadRequest(data);
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+export const FetchLeaderboard = createAsyncThunk(
+  "users/PostUsersWeightsCode",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await getLeaderBoardRequest();
       return response.result;
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to fetch users");
@@ -112,6 +195,48 @@ const userSlice = createSlice({
         state.employer = action.payload?.data;
       })
       .addCase(GetEmployeer.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+
+      // Get Users with Employer Code
+      .addCase(UsersWithEmployerCode.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(UsersWithEmployerCode.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.usersWithEmployerCode = action.payload?.data;
+      })
+      .addCase(UsersWithEmployerCode.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+
+      // Get Users Weights Code
+      .addCase(GetUsersWeightsCode.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(GetUsersWeightsCode.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.userWeights = action.payload?.data;
+      })
+      .addCase(GetUsersWeightsCode.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+
+      // Get LeaderBoard Code
+      .addCase(FetchLeaderboard.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(FetchLeaderboard.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.leaderBoard = action.payload?.data;
+      })
+      .addCase(FetchLeaderboard.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
       });

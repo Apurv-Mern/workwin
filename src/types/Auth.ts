@@ -1,3 +1,5 @@
+import type { Role } from "./Permission";
+
 export type UserRole = "super-admin" | "admin" | "employer" | "user";
 
 export interface Permission {
@@ -10,6 +12,7 @@ export interface AuthUser {
   email: string;
   name: string;
   role: UserRole;
+  Roles: Role[];
   permissions: string[];
 }
 

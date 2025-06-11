@@ -9,6 +9,9 @@ const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Login = lazy(() => import("../pages/Login"));
 const Users = lazy(() => import("../pages/Users"));
 const RoleManagement = lazy(() => import("../pages/RoleManagement"));
+const XpSystem = lazy(() => import("../pages/XpSystem"));
+const LeaderBoard = lazy(() => import("../pages/LeaderBoard"));
+const Reward = lazy(() => import("../pages/Reward"));
 
 // Loading fallback
 const LoadingFallback = () => (
@@ -46,6 +49,9 @@ const AppRoutes = () => {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="users" element={<Users />} />
           <Route path="role/management" element={<RoleManagement />} />
+          <Route path="xp-system" element={<XpSystem />} />
+          <Route path="leaderboard" element={<LeaderBoard />} />
+          <Route path="reward" element={<Reward />} />
         </Route>
 
         {/* Fallback route */}

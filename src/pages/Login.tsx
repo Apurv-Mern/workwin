@@ -29,7 +29,6 @@ const Login: React.FC = () => {
   });
 
   const onSubmit = async (data: LoginCredentials) => {
-    console.log("Login data:", data);
     const result = await dispatch(login(data));
     if (login.fulfilled.match(result)) {
       toast.success("Login successful!");

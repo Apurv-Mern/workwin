@@ -185,30 +185,50 @@ const AdminLayout: React.FC = () => {
 
             <LinkNavItem
               as={Link}
-              to="/rewards"
+              to="/xp-system"
               className={`py-3 ${
-                location.pathname === "/rewards"
+                location.pathname === "/xp-system"
                   ? "active bg-primary text-white"
                   : ""
               }`}
             >
               <i className="bi bi-trophy me-3"></i>
-              <span className={sidebarCollapsed ? "d-none" : ""}>Rewards</span>
+              <span className={sidebarCollapsed ? "d-none" : ""}>
+                XP System
+              </span>
             </LinkNavItem>
+            {hasPermission("leaderboard.read") && (
+              <LinkNavItem
+                as={Link}
+                to="/leaderboard"
+                className={`py-3 ${
+                  location.pathname === "/leaderboard"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
+              >
+                <i className="bi bi-trophy me-3"></i>
+                <span className={sidebarCollapsed ? "d-none" : ""}>
+                  LeaderBoard
+                </span>
+              </LinkNavItem>
+            )}
 
-            <LinkNavItem
-              as={Link}
-              to="/levels"
-              className={`py-3 ${
-                location.pathname === "/levels"
-                  ? "active bg-primary text-white"
-                  : ""
-              }`}
-            >
-              <i className="bi bi-bar-chart-steps me-3"></i>
-              <span className={sidebarCollapsed ? "d-none" : ""}>Levels</span>
-            </LinkNavItem>
-
+            {hasPermission("reward.read") && (
+              <LinkNavItem
+                as={Link}
+                to="/reward"
+                className={`py-3 ${
+                  location.pathname === "/reward"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
+              >
+                <i className="bi bi-bar-chart-steps me-3"></i>
+                <span className={sidebarCollapsed ? "d-none" : ""}>Reward</span>
+              </LinkNavItem>
+            )}
+            {/* 
             <LinkNavItem
               as={Link}
               to="/leaderboard"
@@ -222,9 +242,9 @@ const AdminLayout: React.FC = () => {
               <span className={sidebarCollapsed ? "d-none" : ""}>
                 Leaderboard
               </span>
-            </LinkNavItem>
+            </LinkNavItem> */}
 
-            <LinkNavItem
+            {/* <LinkNavItem
               as={Link}
               to="/kpi-settings"
               className={`py-3 ${
@@ -237,9 +257,9 @@ const AdminLayout: React.FC = () => {
               <span className={sidebarCollapsed ? "d-none" : ""}>
                 KPI Settings
               </span>
-            </LinkNavItem>
+            </LinkNavItem> */}
 
-            <LinkNavItem
+            {/* <LinkNavItem
               as={Link}
               to="/settings"
               className={`py-3 ${
@@ -250,7 +270,7 @@ const AdminLayout: React.FC = () => {
             >
               <i className="bi bi-gear me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>Settings</span>
-            </LinkNavItem>
+            </LinkNavItem> */}
           </Nav>
 
           <div className="mt-auto p-3 border-top d-none d-lg-block">

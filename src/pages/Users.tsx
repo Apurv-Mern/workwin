@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from "react";
-import { Button, Table, Badge } from "react-bootstrap";
+import { Button, Table, Badge, Form, InputGroup } from "react-bootstrap";
 import EditUserModal from "../components/EditUserModal";
 import DeleteUserModal from "../components/DeleteUserModal";
 import {
   createUsers,
   editUsersById,
   fetchUsers,
+  DeleteUsersById,
 } from "../store/slices/userSlice";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import CreateUserModal from "../components/CreateUserModal";
 import { toast } from "react-toastify";
 import { usePermissions } from "../utils/handlePermissions";
+import * as XLSX from "xlsx";
 
 type RoleKey = "SuperAdmin" | "SubAdmin" | "Employer";
 
@@ -54,6 +56,8 @@ const Users: React.FC = () => {
   const [showDelete, setShowDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [uploadedUsers, setUploadedUsers] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
 
   const loggedInUser = JSON.parse(localStorage.getItem("user") || "{}");
   const loggedInRole = (loggedInUser.role || "User") as RoleKey;
@@ -92,19 +96,193 @@ const Users: React.FC = () => {
     }
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     setShowDelete(false);
+    const res = await dispatch(DeleteUsersById(selectedUser.id));
+    if (DeleteUsersById.fulfilled.match(res)) {
+      toast.success("User deleted successfully!");
+      dispatch(fetchUsers());
+    }
   };
 
   const filterFn = roleVisibility[loggedInRole] || (() => true);
   const filteredUsers = users.filter((user: any) => {
     const userRole = user.roles?.[0]?.name;
-    return filterFn(userRole);
+    const matchesSearch =
+      user.name.toLowerCase().includes(search.toLowerCase()) ||
+      user.email.toLowerCase().includes(search.toLowerCase());
+    return filterFn(userRole) && matchesSearch;
   });
+
+  // Download sample sheet
+  const handleDownloadSample = () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Name", "Email", "Password"],
+      ["", "", ""],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "Users");
+    XLSX.writeFile(wb, "user_sample.xlsx");
+  };
+
+  // Handle bulk upload
+  const handleBulkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      if (!bstr) return;
+      const wb = XLSX.read(bstr, { type: "binary" });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as string[][];
+      // Remove header row
+      const users = data
+        .slice(1)
+        .filter((row) => row[0] || row[1] || row[2])
+        .map((row) => ({
+          name: row[0] || "",
+          email: row[1] || "",
+          password: row[2] || "",
+          status: "inactive",
+        }));
+      setUploadedUsers(users);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // Approve/Unapprove logic
+  const handleApprove = (idx: number) => {
+    setUploadedUsers((users) =>
+      users.map((u, i) => (i === idx ? { ...u, status: "active" } : u))
+    );
+  };
+  const handleUnapprove = (idx: number) => {
+    setUploadedUsers((users) =>
+      users.map((u, i) => (i === idx ? { ...u, status: "inactive" } : u))
+    );
+  };
+
+  // Bulk submit handler
+  const handleBulkSubmit = async () => {
+    const activeUsers = uploadedUsers.filter((u) => u.status === "active");
+    if (activeUsers.length === 0) {
+      toast.error("No users marked as active to submit.");
+      return;
+    }
+    let successCount = 0;
+    let failCount = 0;
+    for (const user of activeUsers) {
+      const [firstname, ...rest] = (user.name || "").split(" ");
+      const lastname = rest.join(" ");
+      const payload = {
+        firstname: firstname || user.name || "",
+        lastname: lastname || "as",
+        email: user.email,
+        roleId: "4",
+        password: String(user.password),
+      };
+      console.log({ payload });
+      // eslint-disable-next-line no-await-in-loop
+      const res = await dispatch(createUsers(payload));
+      if (createUsers.fulfilled.match(res)) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    }
+    if (successCount > 0) {
+      toast.success(`${successCount} user(s) created successfully!`);
+      setUploadedUsers([]);
+      dispatch(fetchUsers());
+    }
+    if (failCount > 0) {
+      toast.error(`${failCount} user(s) failed to create.`);
+    }
+  };
 
   return (
     <div style={{ padding: "2rem" }}>
       <h2 style={{ fontWeight: 600 }}>Users</h2>
+      <div className="mb-3 d-flex gap-2">
+        <Button variant="outline-primary" onClick={handleDownloadSample}>
+          Download Sample Sheet
+        </Button>
+        <Form.Label
+          htmlFor="bulk-upload"
+          className="btn btn-outline-success mb-0"
+        >
+          Bulk Upload Users
+        </Form.Label>
+        <Form.Control
+          id="bulk-upload"
+          type="file"
+          accept=".xlsx,.xls"
+          style={{ display: "none" }}
+          onChange={handleBulkUpload}
+        />
+      </div>
+      {/* Uploaded users table */}
+      {uploadedUsers.length > 0 && (
+        <div className="mb-4">
+          <h5>Uploaded Users (Pending Approval)</h5>
+          <Table
+            hover
+            responsive
+            className="mb-0"
+            style={{ background: "#fff" }}
+          >
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Password</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uploadedUsers.map((user, idx) => (
+                <tr key={idx}>
+                  <td>{user.name}</td>
+                  <td>{user.email}</td>
+                  <td>{user.password}</td>
+                  <td>
+                    <Badge bg={user.status === "active" ? "success" : "danger"}>
+                      {user.status === "active" ? "Active" : "Inactive"}
+                    </Badge>
+                  </td>
+                  <td>
+                    {user.status === "active" ? (
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        onClick={() => handleUnapprove(idx)}
+                      >
+                        Unapprove
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline-success"
+                        onClick={() => handleApprove(idx)}
+                      >
+                        Approve
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <div className="mt-3 text-end">
+            <Button variant="primary" onClick={handleBulkSubmit}>
+              Submit Active Users
+            </Button>
+          </div>
+        </div>
+      )}
       {hasPermission("user.create") && (
         <Button
           variant="primary"
@@ -126,16 +304,21 @@ const Users: React.FC = () => {
           marginTop: 24,
         }}
       >
-        {/* <InputGroup className="mb-2">
-          <InputGroup.Text>
-            <i className="bi bi-search"></i>
-          </InputGroup.Text>
-          <Form.Control
-            placeholder="Search by name, email, role, or status..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </InputGroup> */}
+        <div
+          className="mb-2 d-flex align-items-center"
+          style={{ maxWidth: 400 }}
+        >
+          <InputGroup>
+            <InputGroup.Text>
+              <i className="bi bi-search"></i>
+            </InputGroup.Text>
+            <Form.Control
+              placeholder="Search by name or email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </InputGroup>
+        </div>
         <div className="mb-2" style={{ color: "#666" }}>
           Found {users.length} of {users.length} users
         </div>
@@ -145,6 +328,7 @@ const Users: React.FC = () => {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Employer Code</th>
               <th>Status</th>
               {(hasPermission("user.update") ||
                 hasPermission("user.delete")) && <th>Actions</th>}
@@ -163,6 +347,7 @@ const Users: React.FC = () => {
                     <div key={role.id}>{roleBadge(role.name)}</div>
                   ))}
                 </td>
+                <td>{user.employerCode}</td>
                 <td>{statusBadge(user.status)}</td>
                 <td>
                   {hasPermission("user.update") && (

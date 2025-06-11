@@ -23,9 +23,17 @@ export interface User {
 }
 
 export interface createUserInterface {
-  firstName: string;
-  lastName: string;
+  firstname: string;
+  lastname: string;
   email: string;
   roleId: string;
   password: string;
+}
+
+export interface UserWeight {
+  emp_Id: string;
+  attendance: string;
+  punctuality: string;
+  shift_completion: string;
+  consistency: string;
 }
