@@ -8,6 +8,8 @@ import {
   GetAllUsersRequest,
   GetEmployerRequest,
   getLeaderBoardRequest,
+  getXpRecordsRequest,
+  getProgressReportRequest,
   getUserWeightRequest,
   postUserExcelUploadRequest,
   postUserWeightRequest,
@@ -22,6 +24,11 @@ interface UserState {
   usersWithEmployerCode: [];
   userWeights: [];
   leaderBoard: [];
+  progressReport: [];
+  xpRecords: any[];
+  xpPagination: any | null;
+  xpStats: any | null;
+  xpCalculation: any | null;
 }
 
 const initialState: UserState = {
@@ -32,6 +39,11 @@ const initialState: UserState = {
   usersWithEmployerCode: [],
   userWeights: [],
   leaderBoard: [],
+  progressReport: [],
+  xpRecords: [],
+  xpPagination: null,
+  xpStats: null,
+  xpCalculation: null,
 };
 
 export const createUsers = createAsyncThunk(
@@ -128,11 +140,10 @@ export const PostUsersWeightsCode = createAsyncThunk(
 
 export const PostUsersExcelUploadCode = createAsyncThunk(
   "users/PostUsersWeightsCode",
-  async (data: any, { rejectWithValue }) => {
+  async ({ file }: { file: File }, { rejectWithValue }) => {
     try {
-      console.log({ data });
-      const response = await postUserExcelUploadRequest(data);
-      return response.result;
+      const response = await postUserExcelUploadRequest(file);
+      return response;
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to fetch users");
     }
@@ -143,6 +154,41 @@ export const FetchLeaderboard = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const response = await getLeaderBoardRequest();
+      return response.result;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+
+export const FetchXpRecords = createAsyncThunk(
+  "users/xpRecords",
+  async (
+    query:
+      | {
+          page?: number;
+          pageSize?: number;
+          location?: string;
+          client?: string;
+          week_start_date?: string;
+        }
+      | undefined,
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await getXpRecordsRequest(query || {});
+      return response;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to fetch users");
+    }
+  }
+);
+
+export const FetchProgressReport = createAsyncThunk(
+  "users/progressReport",
+  async (id: any, { rejectWithValue }) => {
+    try {
+      const response = await getProgressReportRequest(id);
       return response.result;
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to fetch users");
@@ -237,6 +283,36 @@ const userSlice = createSlice({
         state.leaderBoard = action.payload?.data;
       })
       .addCase(FetchLeaderboard.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+
+      // Get Progress Report Code
+      .addCase(FetchProgressReport.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(FetchProgressReport.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.progressReport = action.payload;
+      })
+      .addCase(FetchProgressReport.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+      // XP Records
+      .addCase(FetchXpRecords.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(FetchXpRecords.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.xpRecords = action.payload?.data || [];
+        state.xpPagination = action.payload?.pagination || null;
+        state.xpStats = action.payload?.statistics || null;
+        state.xpCalculation = action.payload?.xpCalculation || null;
+      })
+      .addCase(FetchXpRecords.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
       });

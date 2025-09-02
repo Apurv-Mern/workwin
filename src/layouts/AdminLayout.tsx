@@ -194,7 +194,7 @@ const AdminLayout: React.FC = () => {
             >
               <i className="bi bi-trophy me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
-                XP System
+                Attendance Based XP System
               </span>
             </LinkNavItem>
             {hasPermission("leaderboard.read") && (

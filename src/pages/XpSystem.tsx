@@ -1,348 +1,339 @@
 import React, { useEffect, useState } from "react";
-import { Button, Form } from "react-bootstrap";
-import * as XLSX from "xlsx"; // Namespace import
+import {
+  Table,
+  Card,
+  Row,
+  Col,
+  Badge,
+  Alert,
+  Pagination,
+  Spinner,
+  Form,
+} from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import {
-  GetEmployeer,
-  GetUsersWeightsCode,
   PostUsersExcelUploadCode,
-  PostUsersWeightsCode,
-  UsersWithEmployerCode,
+  FetchXpRecords,
 } from "../store/slices/userSlice";
-import type { UserWeight } from "../types/Permission";
 import { toast } from "react-toastify";
 
 const XpSystem = () => {
   const dispatch = useAppDispatch();
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPaginating, setIsPaginating] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
+  const [clientFilter, setClientFilter] = useState("");
+  const [debouncedClient, setDebouncedClient] = useState("");
 
-  const [selectedEmployer, setSelectedEmployer] = useState<string>("");
-  const [selectedEmployerForWeights, setSelectedEmployerForWeights] =
-    useState<string>("");
-  const { employer, usersWithEmployerCode } = useAppSelector(
-    (state) => state.users
-  );
-
-  const { userWeights }: { userWeights: UserWeight[] } = useAppSelector(
-    (state) => state.users
-  );
-
-  const { user } = useAppSelector((state) => state.auth);
-  const roleId = user?.Roles[0]?.id;
-  const [fields, setFields] = useState({
-    emp_Id: selectedEmployerForWeights,
-    attendance: "",
-    punctuality: "",
-    shiftCompletion: "",
-    consistency: "",
-  });
-  const [error, setError] = useState("");
-  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const {
+    xpRecords,
+    xpStats,
+    xpPagination,
+    xpCalculation,
+    isLoading: storeLoading,
+  } = useAppSelector((state) => state.users as any);
 
   useEffect(() => {
-    dispatch(GetEmployeer());
-  }, []);
+    const id = setTimeout(() => {
+      setDebouncedClient(clientFilter.trim());
+    }, 400);
+    return () => clearTimeout(id);
+  }, [clientFilter]);
 
   useEffect(() => {
-    if (selectedEmployerForWeights) {
-      dispatch(GetUsersWeightsCode(selectedEmployerForWeights as any));
-    }
-  }, [selectedEmployerForWeights]);
+    setIsPaginating(true);
+    dispatch(
+      FetchXpRecords({
+        page,
+        pageSize,
+        client: debouncedClient || undefined,
+      })
+    ).finally(() => setIsPaginating(false));
+  }, [dispatch, page, debouncedClient]);
 
-  useEffect(() => {
-    if (selectedEmployer) {
-      dispatch(
-        UsersWithEmployerCode({ employerCode: selectedEmployer } as any)
-      );
-    }
-  }, [selectedEmployer]);
-
-  useEffect(() => {
-    if (userWeights && userWeights.length > 0) {
-      const uw = userWeights[0];
-      setFields({
-        emp_Id: uw.emp_Id?.toString() || "",
-        attendance: uw.attendance || "0.00",
-        punctuality: uw.punctuality || "0.00",
-        shiftCompletion: uw.shift_completion || "0.00",
-        consistency: uw.consistency || "0.00",
-      });
-    } else {
-      // Set all to zero if nothing returned
-      setFields({
-        emp_Id: selectedEmployerForWeights,
-        attendance: "0.00",
-        punctuality: "0.00",
-        shiftCompletion: "0.00",
-        consistency: "0.00",
-      });
-    }
-  }, [userWeights]);
-
-  const handleDownload = () => {
-    if (!selectedEmployer || !usersWithEmployerCode) return;
-    const wb = XLSX.utils.book_new();
-
-    const data = [
-      // First row - main headers (merge these cells in Excel)
-      [
-        "Name",
-        "Email",
-        "Attendance",
-        "",
-        "Punctuality",
-        "",
-        "Shift Completion",
-        "",
-        "Consistency (Streaks)",
-        "",
-      ],
-      // Second row - subheaders
-      [
-        "",
-        "",
-        "Approved Shifts",
-        "Expected Shifts",
-        "On-Time Shifts",
-        "Approved Shifts",
-        "Completed Shifts",
-        "Assigned Shifts",
-        "Streak Days",
-        "Max Possible Streak",
-      ],
-      // Data rows
-      ...usersWithEmployerCode.map((user: any) => [
-        user.name || "",
-        user.email || "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-      ]),
-    ];
-
-    // Create worksheet
-    const ws = XLSX.utils.aoa_to_sheet(data);
-
-    // Add merges for the header cells
-    if (!ws["!merges"]) ws["!merges"] = [];
-
-    // Merge main header cells
-    ws["!merges"].push(
-      { s: { r: 0, c: 2 }, e: { r: 0, c: 3 } },
-      { s: { r: 0, c: 4 }, e: { r: 0, c: 5 } },
-      { s: { r: 0, c: 6 }, e: { r: 0, c: 7 } },
-      { s: { r: 0, c: 8 }, e: { r: 0, c: 9 } }
-    );
-
-    ws["!cols"] = [
-      { wch: 20 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, "XP Allocation");
-    const fileName = `XP_System.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const res = await dispatch(PostUsersExcelUploadCode(file));
+    if (!file) return;
+
+    setIsLoading(true);
+    try {
+      const res = await dispatch(
+        PostUsersExcelUploadCode({
+          file,
+        })
+      );
 
       if (PostUsersExcelUploadCode.fulfilled.match(res)) {
+        // call the fetch xp records action
+        dispatch(
+          FetchXpRecords({
+            page: 1,
+            pageSize,
+            client: debouncedClient || undefined,
+          })
+        );
         toast.success("File uploaded successfully!");
       }
+    } catch (error) {
+      toast.error("Upload failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+      event.target.value = "";
     }
   };
 
-  const handleFieldChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    // Allow only numbers and decimals
-    if (!/^\d*\.?\d*$/.test(value)) return;
-    const newFields = { ...fields, [name]: value };
-    setFields(newFields);
-    // Validation: max value is 1 for any field
-    if (value && parseFloat(value) > 1) {
-      setError("Maximum value for any field is 1.");
-      return;
-    }
-    // Validation: sum of all fields must not exceed 1
-    const sum =
-      (parseFloat(newFields.attendance) || 0) +
-      (parseFloat(newFields.punctuality) || 0) +
-      (parseFloat(newFields.shiftCompletion) || 0) +
-      (parseFloat(newFields.consistency) || 0);
-    if (sum > 1) {
-      setError("The sum of all fields must not exceed 1.");
-    } else {
-      setError("");
-    }
+  const getDayColor = (present: boolean) => {
+    return present ? "success" : "secondary";
   };
 
-  const handleFieldFocus = (field: string) => {
-    setFocusedField(field);
+  const getXPBadgeColor = (xp: number, maxXP: number) => {
+    const percentage = (xp / maxXP) * 100;
+    if (percentage >= 80) return "success";
+    if (percentage >= 60) return "warning";
+    return "danger";
   };
-
-  const handleFieldBlur = () => {
-    setFocusedField(null);
-  };
-
-  const handleSave = () => {
-    dispatch(PostUsersWeightsCode(fields));
-  };
-  console.log({ fields });
 
   return (
     <div>
-      {(roleId === 1 || roleId === 2) && (
-        <Form.Group className="mb-3">
-          <Form.Label>Employer List</Form.Label>
-          <Form.Select
-            value={selectedEmployer}
-            onChange={(e) => setSelectedEmployer(e.target.value)}
-            required
-          >
-            <option value="">Please select a Employer</option>
-            {employer.map((emp: any) => (
-              <option key={emp.id} value={emp.employerCode}>
-                {emp.name} | {emp.email}
-              </option>
-            ))}
-          </Form.Select>
-        </Form.Group>
-      )}
-
-      <div className="mb-3">
-        <Button
-          variant="primary"
-          onClick={handleDownload}
-          className="me-2"
-          disabled={!selectedEmployer}
-        >
-          Download Sample Format
-        </Button>
+      <div className="mb-4">
         <label htmlFor="excel-upload" className="btn btn-success mb-0">
-          Upload Excel
+          {isLoading ? (
+            <>
+              <Spinner
+                as="span"
+                animation="border"
+                size="sm"
+                role="status"
+                aria-hidden="true"
+                className="me-2"
+              />
+              Uploading...
+            </>
+          ) : (
+            "Upload Excel"
+          )}
         </label>
         <input
           id="excel-upload"
           type="file"
-          accept=".xlsx,.xls"
+          accept=".xlsx,.xls,.csv"
           style={{ display: "none" }}
           onChange={handleUpload}
+          disabled={isLoading}
         />
       </div>
 
-      <div className="mb-3">
-        <div className="mb-3 p-2 bg-light border rounded">Weights</div>
+      {/* Existing XP Records from DB */}
 
-        <div className="mb-3">
-          <Form.Group className="mb-3">
-            <Form.Label>Employer List</Form.Label>
-            <Form.Select
-              value={selectedEmployerForWeights}
-              onChange={(e) => setSelectedEmployerForWeights(e.target.value)}
-              required
-            >
-              <option value="">Please select a Employer for set weights</option>
-              {employer.map((emp: any) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name} | {emp.email}
-                </option>
-              ))}
-            </Form.Select>
-          </Form.Group>
-        </div>
+      {/* XP Calculation Info */}
+      <Alert variant="info" className="mb-4">
+        <h5>XP Calculation System</h5>
+        <p>
+          <strong>Formula:</strong> {xpCalculation?.formula}
+        </p>
+        <p>
+          <strong>Description:</strong> {xpCalculation?.description}
+        </p>
+        <p>
+          <strong>XP per Day:</strong> {xpCalculation?.xpPerDay}
+        </p>
+        <p>
+          <strong>Maximum Weekly XP:</strong> {xpCalculation?.maxWeeklyXP}
+        </p>
+      </Alert>
 
-        {selectedEmployerForWeights && (
-          <div>
-            <Form.Label>Attendance</Form.Label>
-            <Form.Control
-              type="number"
-              step="any"
-              min="0"
-              max="1"
-              name="attendance"
-              value={fields.attendance}
-              onChange={handleFieldChange}
-              onFocus={() => handleFieldFocus("attendance")}
-              onBlur={handleFieldBlur}
-              placeholder="Attendance"
-              disabled={
-                error === "The sum of all fields must not exceed 1." &&
-                focusedField !== "attendance"
-              }
-            />
-            <Form.Label>Punctuality</Form.Label>
-            <Form.Control
-              type="number"
-              step="any"
-              min="0"
-              max="1"
-              name="punctuality"
-              value={fields.punctuality}
-              onChange={handleFieldChange}
-              onFocus={() => handleFieldFocus("punctuality")}
-              onBlur={handleFieldBlur}
-              placeholder="Punctuality"
-              disabled={
-                error === "The sum of all fields must not exceed 1." &&
-                focusedField !== "punctuality"
-              }
-            />
-            <Form.Label>Shift Completion</Form.Label>
-            <Form.Control
-              type="number"
-              step="any"
-              min="0"
-              max="1"
-              name="shiftCompletion"
-              value={fields.shiftCompletion}
-              onChange={handleFieldChange}
-              onFocus={() => handleFieldFocus("shiftCompletion")}
-              onBlur={handleFieldBlur}
-              placeholder="Shift Completion"
-              disabled={
-                error === "The sum of all fields must not exceed 1." &&
-                focusedField !== "shiftCompletion"
-              }
-            />
-            <Form.Label>Consistency (Streaks)</Form.Label>
-            <Form.Control
-              type="number"
-              step="any"
-              min="0"
-              max="1"
-              name="consistency"
-              value={fields.consistency}
-              onChange={handleFieldChange}
-              onFocus={() => handleFieldFocus("consistency")}
-              onBlur={handleFieldBlur}
-              placeholder="Consistency (Streaks)"
-              disabled={
-                error === "The sum of all fields must not exceed 1." &&
-                focusedField !== "consistency"
-              }
-            />
-            {error && <div style={{ color: "red", marginTop: 8 }}>{error}</div>}
-            <div className="mb-3">
-              <Button variant="primary" onClick={handleSave} className="me-2">
-                Save
-              </Button>
+      <div className="mt-4">
+        {/* Statistics Cards */}
+        <Row className="mb-4">
+          <Col md={3}>
+            <Card className="text-center">
+              <Card.Body>
+                <Card.Title>Total Employees</Card.Title>
+                <h3 className="text-primary">
+                  {xpStats?.totalEmployees || xpStats?.totalEmployees}
+                </h3>
+              </Card.Body>
+            </Card>
+          </Col>
+          <Col md={3}>
+            <Card className="text-center">
+              <Card.Body>
+                <Card.Title>Highest XP</Card.Title>
+                <h3 className="text-success">
+                  {xpStats?.highestXP?.toLocaleString?.() ?? xpStats?.highestXP}
+                </h3>
+              </Card.Body>
+            </Card>
+          </Col>
+          <Col md={3}>
+            <Card className="text-center">
+              <Card.Body>
+                <Card.Title>Average XP</Card.Title>
+                <h3 className="text-warning">
+                  {xpStats?.averageXP?.toLocaleString?.() ?? xpStats?.averageXP}
+                </h3>
+              </Card.Body>
+            </Card>
+          </Col>
+          <Col md={3}>
+            <Card className="text-center">
+              <Card.Body>
+                <Card.Title>Lowest XP</Card.Title>
+                <h3 className="text-danger">
+                  {xpStats?.lowestXP?.toLocaleString?.() ?? xpStats?.lowestXP}
+                </h3>
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+
+        <Card>
+          <Card.Header>
+            <div className="d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">Existing XP Records</h5>
+              <div className="ms-3" style={{ minWidth: 240 }}>
+                <Form.Control
+                  size="sm"
+                  type="text"
+                  placeholder="Filter by client..."
+                  value={clientFilter}
+                  onChange={(e) => {
+                    setPage(1);
+                    setClientFilter(e.target.value);
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          </Card.Header>
+          <Card.Body>
+            {storeLoading && xpRecords.length === 0 ? (
+              <div className="text-center my-3">
+                <Spinner animation="border" size="sm" className="me-2" />
+                Loading records...
+              </div>
+            ) : (
+              <Table
+                responsive
+                striped
+                hover
+                className={isPaginating ? "opacity-50" : ""}
+              >
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Location</th>
+                    <th>Client</th>
+                    <th>Total XP</th>
+                    <th>Days Present</th>
+                    <th>Current Streak</th>
+                    <th>Max Streak</th>
+                    <th>Total Hours</th>
+                    <th>Weekly Attendance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {xpRecords.map((rec: any) => (
+                    <tr key={`${rec.person_id}-${rec.upload_date || ""}`}>
+                      <td>
+                        {rec.full_name ||
+                          rec.name ||
+                          rec.firstname + " " + rec.surname}
+                      </td>
+                      <td>{rec.location}</td>
+                      <td>{rec.client}</td>
+                      <td>
+                        <Badge
+                          bg={getXPBadgeColor(rec.total_xp, 17500)}
+                          className="fs-6"
+                        >
+                          {Number(rec.total_xp || 0).toLocaleString()} XP
+                        </Badge>
+                      </td>
+                      <td>
+                        <Badge bg="info">{rec.total_days_present}/7 days</Badge>
+                      </td>
+                      <td>{rec.current_streak}</td>
+                      <td>{rec.max_streak}</td>
+                      <td>{Number(rec.total_hours || 0).toFixed(2)} hrs</td>
+                      <td>
+                        <div className="d-flex gap-1">
+                          {[
+                            {
+                              key: "sun",
+                              present: rec.sunday_present,
+                              hours: rec.sunday_hours,
+                            },
+                            {
+                              key: "mon",
+                              present: rec.monday_present,
+                              hours: rec.monday_hours,
+                            },
+                            {
+                              key: "tue",
+                              present: rec.tuesday_present,
+                              hours: rec.tuesday_hours,
+                            },
+                            {
+                              key: "wed",
+                              present: rec.wednesday_present,
+                              hours: rec.wednesday_hours,
+                            },
+                            {
+                              key: "thu",
+                              present: rec.thursday_present,
+                              hours: rec.thursday_hours,
+                            },
+                            {
+                              key: "fri",
+                              present: rec.friday_present,
+                              hours: rec.friday_hours,
+                            },
+                            {
+                              key: "sat",
+                              present: rec.saturday_present,
+                              hours: rec.saturday_hours,
+                            },
+                          ].map((d) => (
+                            <Badge
+                              key={d.key}
+                              bg={getDayColor(Boolean(d.present))}
+                              title={`${d.key.toUpperCase()}: ${
+                                d.present ? `${d.hours}h` : "Absent"
+                              }`}
+                            >
+                              {d.key.charAt(0).toUpperCase()}
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+
+            {xpPagination && xpPagination.totalPages > 1 && (
+              <div className="d-flex justify-content-center mt-3">
+                <Pagination>
+                  <Pagination.Prev
+                    disabled={page <= 1 || isPaginating}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  />
+                  <Pagination.Item active>
+                    {xpPagination.currentPage || page}
+                  </Pagination.Item>
+                  <Pagination.Next
+                    disabled={
+                      page >= (xpPagination.totalPages || 1) || isPaginating
+                    }
+                    onClick={() => setPage((p) => p + 1)}
+                  />
+                </Pagination>
+              </div>
+            )}
+          </Card.Body>
+        </Card>
       </div>
     </div>
   );

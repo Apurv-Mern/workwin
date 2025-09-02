@@ -17,7 +17,9 @@ import {
   fetchRewards,
   updateReward,
   deleteReward,
+  assignRewards,
 } from "../store/slices/rewardSlice";
+import { FetchLeaderboard } from "../store/slices/userSlice";
 import { toast } from "react-toastify";
 import { usePermissions } from "../utils/handlePermissions";
 import EditRewardModal from "../components/EditRewardModal";
@@ -31,14 +33,35 @@ const Reward = () => {
   const { hasPermission } = usePermissions();
   const dispatch = useAppDispatch();
   const { rewards, isLoading } = useAppSelector((state: any) => state.rewards);
+  const { leaderBoard } = useAppSelector((state: any) => state.users);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedReward, setSelectedReward] = useState<any>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [rewardToDelete, setRewardToDelete] = useState<any>(null);
+  const [selectedWinners, setSelectedWinners] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     dispatch(fetchRewards(key));
+    dispatch(FetchLeaderboard());
   }, [dispatch, key]);
+
+  // Set initial selected winners when rewards are loaded
+  useEffect(() => {
+    if (rewards && rewards.length > 0) {
+      const initialWinners = rewards.reduce(
+        (acc: Record<string, string>, reward: any) => {
+          if (reward.winner_id) {
+            acc[reward.id] = reward.winner_id;
+          }
+          return acc;
+        },
+        {}
+      );
+      setSelectedWinners(initialWinners);
+    }
+  }, [rewards]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -103,6 +126,35 @@ const Reward = () => {
     }
     setShowDeleteModal(false);
     setRewardToDelete(null);
+  };
+
+  const handleWinnerSelect = async (rewardId: string, userId: string) => {
+    console.log({ rewardId, userId });
+    setSelectedWinners((prev) => ({
+      ...prev,
+      [rewardId]: userId,
+    }));
+
+    await handleSaveWinner(rewardId, userId || null);
+  };
+
+  const handleSaveWinner = async (rewardId: string, userId: string | null) => {
+    const payload = {
+      userId,
+      rewardId,
+    };
+
+    const res = await dispatch(assignRewards(payload));
+    if (assignRewards.fulfilled.match(res)) {
+      toast.success(
+        userId
+          ? "Reward assigned successfully"
+          : "Reward unassigned successfully"
+      );
+      dispatch(fetchRewards(key));
+    } else {
+      toast.error("Failed to update reward assignment");
+    }
   };
 
   return (
@@ -175,6 +227,7 @@ const Reward = () => {
                     <th>Image</th>
                     <th>Edit</th>
                     <th>Delete</th>
+                    <th>Select Winner</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -212,6 +265,32 @@ const Reward = () => {
                         >
                           Delete
                         </Button>
+                      </td>
+                      <td>
+                        <Form.Select
+                          size="sm"
+                          value={selectedWinners[reward.id] || ""}
+                          onChange={(e) =>
+                            handleWinnerSelect(reward.id, e.target.value)
+                          }
+                        >
+                          <option value="">Select Winner</option>
+                          {leaderBoard?.map((user: any) => (
+                            <option key={user.id} value={user.id}>
+                              {user.name} ({user.totalUserXp} XP)
+                            </option>
+                          ))}
+                        </Form.Select>
+                        {reward.winner_id && (
+                          <small className="text-muted">
+                            Current Winner:{" "}
+                            {
+                              leaderBoard?.find(
+                                (user: any) => user.id === reward.winner_id
+                              )?.name
+                            }
+                          </small>
+                        )}
                       </td>
                     </tr>
                   ))}

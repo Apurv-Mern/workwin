@@ -17,7 +17,10 @@ import {
   updateReward,
   deleteReward,
   leaderBoard,
+  xpRecords,
   deleteUsers,
+  assignRewards,
+  progressReport,
 } from "./endpoints";
 
 // Define the API requests
@@ -137,7 +140,7 @@ export const postUserExcelUploadRequest = async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await api.post(`${userExcelUpload}`, formData, {
+    const response = await api.post(`${userExcelUpload} `, formData, {
       headers: {
         "Content-Type": "multipart/form-data",
       },
@@ -152,6 +155,33 @@ export const postUserExcelUploadRequest = async (file: File) => {
 export const getLeaderBoardRequest = async () => {
   try {
     const response = await api.get(`${leaderBoard}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export interface XpRecordQuery {
+  page?: number;
+  pageSize?: number;
+  location?: string;
+  client?: string;
+  week_start_date?: string;
+}
+
+export const getXpRecordsRequest = async (query: XpRecordQuery = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (query.page) params.set("page", String(query.page));
+    if (query.pageSize) params.set("pageSize", String(query.pageSize));
+    if (query.location) params.set("location", query.location);
+    if (query.client) params.set("client", query.client);
+    if (query.week_start_date)
+      params.set("week_start_date", query.week_start_date);
+
+    const qs = params.toString();
+    const url = qs ? `${xpRecords}?${qs}` : `${xpRecords}`;
+    const response = await api.get(url);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
@@ -200,6 +230,25 @@ export const updateRewardRequest = async (data: any) => {
 export const deleteRewardRequest = async (id: any) => {
   try {
     const response = await api.delete(`${deleteReward}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const assignRewardsRequest = async (data: any) => {
+  try {
+    const response = await api.post(`${assignRewards}`, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const getProgressReportRequest = async (id: any) => {
+  try {
+    const { userId } = id;
+    const response = await api.get(`${progressReport}/${userId}`);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;

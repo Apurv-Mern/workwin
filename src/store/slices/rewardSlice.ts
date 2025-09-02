@@ -4,6 +4,7 @@ import {
   getRewardsRequest,
   updateRewardRequest,
   deleteRewardRequest,
+  assignRewardsRequest,
 } from "../Api/requests";
 
 interface RewardState {
@@ -67,6 +68,18 @@ export const deleteReward = createAsyncThunk(
   }
 );
 
+export const assignRewards = createAsyncThunk(
+  "rewards/assignRewards",
+  async (data: any, { rejectWithValue }) => {
+    try {
+      const reward = await assignRewardsRequest(data);
+      return reward;
+    } catch (error: any) {
+      return rejectWithValue(error.message || "Failed to assign reward");
+    }
+  }
+);
+
 const rewardSlice = createSlice({
   name: "rewards",
   initialState,
@@ -119,11 +132,24 @@ const rewardSlice = createSlice({
       })
       .addCase(deleteReward.fulfilled, (state) => {
         state.isLoading = false;
-        // state.rewards = state.rewards.filter(
-        //   (reward: any) => reward.id !== action.payload
-        // );
       })
       .addCase(deleteReward.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+      // Assign Rewards
+      .addCase(assignRewards.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(assignRewards.fulfilled, (state, action) => {
+        state.isLoading = false;
+        // Update the rewards state with the new assignments
+        if (action.payload?.data) {
+          state.rewards = action.payload.data;
+        }
+      })
+      .addCase(assignRewards.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
       });

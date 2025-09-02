@@ -7,12 +7,14 @@ import {
   editUsersById,
   fetchUsers,
   DeleteUsersById,
+  FetchProgressReport,
 } from "../store/slices/userSlice";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import CreateUserModal from "../components/CreateUserModal";
 import { toast } from "react-toastify";
 import { usePermissions } from "../utils/handlePermissions";
 import * as XLSX from "xlsx";
+import ViewRewardModal from "../components/ViewRewardModal";
 
 type RoleKey = "SuperAdmin" | "SubAdmin" | "Employer";
 
@@ -49,19 +51,22 @@ const roleVisibility: Record<RoleKey, (roleName: string) => boolean> = {
 
 const Users: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { users } = useAppSelector((state: any) => state.users);
+  const { users, progressReport } = useAppSelector((state: any) => state.users);
   const { hasPermission } = usePermissions();
 
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showView, setShowView] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUserForView, setSelectedUserForView] = useState<any>(null);
   const [uploadedUsers, setUploadedUsers] = useState<any[]>([]);
   const [search, setSearch] = useState("");
 
   const loggedInUser = JSON.parse(localStorage.getItem("user") || "{}");
   const loggedInRole = (loggedInUser.role || "User") as RoleKey;
 
+  console.log({ selectedUserForView });
   useEffect(() => {
     (async () => {
       await dispatch(fetchUsers());
@@ -88,7 +93,6 @@ const Users: React.FC = () => {
 
   const handleEditModel = async (user: any) => {
     setShowEdit(false);
-    console.log({ user });
     const res = await dispatch(editUsersById(user));
     if (editUsersById.fulfilled.match(res)) {
       toast.success("User updated successfully!");
@@ -103,6 +107,11 @@ const Users: React.FC = () => {
       toast.success("User deleted successfully!");
       dispatch(fetchUsers());
     }
+  };
+
+  const handleView = (user: any) => {
+    setSelectedUserForView(user);
+    setShowView(true);
   };
 
   const filterFn = roleVisibility[loggedInRole] || (() => true);
@@ -123,6 +132,15 @@ const Users: React.FC = () => {
     ]);
     XLSX.utils.book_append_sheet(wb, ws, "Users");
     XLSX.writeFile(wb, "user_sample.xlsx");
+  };
+
+  const getProgressReport = async (user: any) => {
+    handleView(user);
+    const payload = { userId: user.id };
+    const res = await dispatch(FetchProgressReport(payload));
+    if (FetchProgressReport.fulfilled.match(res)) {
+      toast.success("Progress report fetched successfully!");
+    }
   };
 
   // Handle bulk upload
@@ -360,9 +378,19 @@ const Users: React.FC = () => {
                       <i className="bi bi-pencil-square"></i>
                     </Button>
                   )}
-                  {/* <Button variant="outline-warning" size="sm" className="me-1">
-                    <i className="bi bi-key"></i>
-                  </Button> */}
+                  {user.roles.map((role: any) =>
+                    role.name === "User" ? (
+                      <Button
+                        key={role.id}
+                        variant="outline-info"
+                        size="sm"
+                        className="me-1"
+                        onClick={() => getProgressReport(user)}
+                      >
+                        <i className="bi bi-eye"></i>
+                      </Button>
+                    ) : null
+                  )}
                   {hasPermission("user.delete") && (
                     <Button
                       variant="outline-danger"
@@ -389,6 +417,11 @@ const Users: React.FC = () => {
         onHide={() => setShowDelete(false)}
         user={selectedUser}
         onDelete={handleDeleteConfirm}
+      />
+      <ViewRewardModal
+        show={showView}
+        onHide={() => setShowView(false)}
+        progressReport={progressReport}
       />
       <CreateUserModal
         show={showCreate}
