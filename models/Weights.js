@@ -10,6 +10,10 @@ class Weights extends Model {
           allowNull: false,
           primaryKey: true,
         },
+        emp_Id: {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+        },
         attendance: {
           type: DataTypes.DOUBLE,
           allowNull: false,

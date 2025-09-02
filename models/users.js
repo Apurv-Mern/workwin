@@ -22,6 +22,18 @@ class Users extends Model {
         type: DataTypes.STRING(255),
         allowNull: false,
       },
+      gender: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      hairColor: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      skinColor: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
       totalUserXp: {
         type: DataTypes.DOUBLE,
         allowNull: true,
@@ -46,6 +58,11 @@ class Users extends Model {
         type: DataTypes.ENUM('active', 'inactive'),
         allowNull: false,
         defaultValue: 'active'
+      },
+      isDeleted: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: false
       }
     }, {
       sequelize,

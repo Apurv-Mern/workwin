@@ -4,7 +4,7 @@ const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions ,UserXpLog ,UserLevel ,LevelDefinition  } = ModelsData;
+const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Season, Rewards } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
 // const HelperOpenAi = require("./../../../utils/openAiHelper");
 const jwt = require("jsonwebtoken");
@@ -99,7 +99,7 @@ const upload = multer({
 
 // User Signup
 router.post('/user_signup', async (req, res) => {
-  const { name, email, password ,employerCode } = req.body;
+  const { name, email, password, employerCode } = req.body;
   try {
     if (!email || !password || !name || !employerCode) {
       return res.status(401).send(HelperUtils.errorObj("Name, email, employer code and password are required"));
@@ -302,10 +302,37 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
     userData.token = token;
-
+    const season = await HelperUtils.getActiveSeason();
+    //get all seasons list data
+    const GetAllSeasonsData = await Season.findAll();
+    userData.seasondata = GetAllSeasonsData.map(entry => {
+      let seasonStatus = "";
+      const seasonName = entry?.seasons_name;
+      const seasonStartDate = entry?.start_date;
+      const seasonEndDate = entry?.end_date;
+      const seasonStatusValue = entry?.status;
+      if (seasonStatusValue == 1) {
+        seasonStatus = "started";
+      } else if (seasonStatusValue == 2) {
+        seasonStatus = "ended";
+      } else if (seasonStatusValue == 3) {
+        seasonStatus = "completed";
+      } else {
+        seasonStatus = "Not Strated";
+      }
+      return {
+        seasonName,
+        seasonStartDate,
+        seasonEndDate,
+        seasonStatus,
+      };
+    });
     // Fetch level badges (with title and progress)
     const userLevels = await UserLevel.findAll({
-      where: { userId: user_id },
+      where: {
+        userId: user_id,
+        season_id: season?.id
+      },
       include: [
         {
           model: LevelDefinition,
@@ -317,22 +344,41 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     });
 
     const currLevel = userDetails.curr_levels || 0;
+    //add all seasons details
 
     userData.badges = userLevels.map(entry => {
+      let seasonStatus = "";
       const badgeLevel = entry.level;
+      const seasonName = season?.seasons_name;
+      const seasonStartDate = season?.start_date;
+      const seasonEndDate = season?.end_date;
+      const seasonStatusValue = season?.status;
+      if (seasonStatusValue == 1) {
+        seasonStatus = "started";
+      } else if (seasonStatusValue == 2) {
+        seasonStatus = "ended";
+      } else if (seasonStatusValue == 3) {
+        seasonStatus = "completed";
+      } else {
+        seasonStatus = "Not Strated";
+      }
       const progress = parseFloat(entry.progress);
       let status = "locked";
-    
+
       if (badgeLevel < currLevel) {
         status = "complete";
       } else if (badgeLevel === currLevel) {
         status = progress === 1.0 ? "complete" : "in_progress";
       }
-    
+
       return {
         level: badgeLevel,
         title: entry.LevelDefinition?.title || `Level ${badgeLevel}`,
         progress,
+        seasonName,
+        seasonStartDate,
+        seasonEndDate,
+        seasonStatus,
         status
       };
     });
@@ -344,6 +390,36 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
   }
 });
 
+// Save user profile
+router.post('/save_profile', userAuthMiddleware, async (req, res) => {
+  const user = req.user;
+  const user_id = user.userId;
+
+  try {
+    if (!user_id) {
+      return res.status(401).send(HelperUtils.errorObj("Invalid input: user is not defined."));
+    }
+
+    const { gender, hairColor, skinColor } = req.body;
+
+    await Users.update({
+      gender,
+      hairColor,
+      skinColor
+    }, {
+      where: { id: user_id }
+    });
+
+    const userDetails = await Users.findByPk(user_id, {
+      attributes: ['gender', 'hairColor', 'skinColor']
+    });
+    res.status(200).send(HelperUtils.successObj("User profile saved successfully", userDetails));
+
+  } catch (error) {
+    console.error("Error in user /save_profile api:", error);
+    return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
+  }
+});
 
 /**
  * @swagger
@@ -446,9 +522,9 @@ router.post('/forgot_password', async (req, res) => {
   if (!email) {
     return res.status(400).send(HelperUtils.errorObj("Email is required"));
   }
-  try{
+  try {
     const user = await Users.findOne({ where: { email } });
-    console.log("user find",user);
+    console.log("user find", user);
     if (!user) {
       return res.status(401).send(HelperUtils.errorObj("data not found"));
     }
@@ -474,7 +550,7 @@ router.post('/forgot_password', async (req, res) => {
     });
 
     return res.status(200).send(HelperUtils.successObj("Password reset instruction sent to your mail id."));
-  }catch (error) {
+  } catch (error) {
     console.error("Error in user Forget password api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
@@ -581,12 +657,14 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
-
+    // get active season name
+    const season = await HelperUtils.getActiveSeason();
     // Check daily play limit
     const todayPlays = await UserXpLog.count({
       where: {
         userId,
         source: 'game',
+        season_id: season?.id,
         type: gameType,
         date: today
       }
@@ -600,6 +678,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
     const todayXpTotal = await UserXpLog.sum('xp', {
       where: {
         userId,
+        season_id: season?.id,
         source: 'game',
         date: today
       }
@@ -614,6 +693,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       userId,
       source: 'game',
       type: gameType,
+      season_id: season?.id,
       xp,
       date: today,
       description: description || `Played ${gameType}, score ${score}`
@@ -632,6 +712,103 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
     res.status(500).send(HelperUtils.errorObj("Failed to claim XP"));
   }
 });
+
+// GET /user/leatherboard
+router.get('/leatherboard', userAuthMiddleware, async (req, res) => {
+  try {
+    // Fetch top 10 users who have the 'User' role
+    const leaderboardUsers = await Users.findAll({
+      include: [{
+        model: Roles,
+        as: 'Roles',
+        where: { name: 'User' },
+        through: { attributes: [] },
+        attributes: [] // ✅ Do not return Roles in result
+      }],
+      attributes: ['id', 'name', 'email', 'curr_levels', 'totalUserXp'],
+      order: [['totalUserXp', 'DESC']],
+      limit: 10
+    });
+
+    res.status(200).send(HelperUtils.successObj("Leaderboard fetch successfully.", leaderboardUsers));
+  } catch (err) {
+    console.error("Error in leaderboard API:", err);
+    res.status(500).send(HelperUtils.errorObj("Something went wrong"));
+  }
+});
+
+// GET /user/leatherboardTopFive
+router.get('/leatherboardTopFive', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Step 1: Fetch all users with 'User' role
+    const allUsers = await Users.findAll({
+      include: [{
+        model: Roles,
+        as: 'Roles',
+        where: { name: 'User' },
+        through: { attributes: [] },
+        attributes: []
+      }],
+      attributes: ['id', 'name', 'email', 'curr_levels', 'totalUserXp'],
+      order: [['totalUserXp', 'DESC']]
+    });
+
+    // Step 2: Find index of the logged-in user
+    const currentIndex = allUsers.findIndex(user => user.id === userId);
+
+    if (currentIndex === -1) {
+      return res.status(404).send(HelperUtils.errorObj("Current user not found in leaderboard"));
+    }
+
+    // Step 3: Slice 5 above and 5 below
+    const start = Math.max(currentIndex - 5, 0);
+    const end = currentIndex + 6; // +6 to include current user + 5 below
+    const leaderboardSlice = allUsers.slice(start, end);
+
+    res.status(200).send(HelperUtils.successObj("Leaderboard around you", leaderboardSlice));
+  } catch (err) {
+    console.error("Error in leaderboard slice:", err);
+    res.status(500).send(HelperUtils.errorObj("Something went wrong"));
+  }
+});
+
+// Get All Rewards
+router.get("/rewards", userAuthMiddleware, async (req, res) => {
+  try {
+    const rewards = await Rewards.findAll({
+      attributes: ["id", "name", "description", "reward_state", "filename"],
+    });
+
+    // Group the rewards by reward_state
+    const groupedRewards = rewards.reduce((acc, reward) => {
+      const formattedReward = {
+        id: reward.id,
+        name: reward.name,
+        description: reward.description,
+        filename: reward.filename
+          ? `https://workwin.24livehost.com:3025/uploads/${reward.filename}`
+          : null,
+      };
+
+      if (!acc[reward.reward_state]) {
+        acc[reward.reward_state] = [];
+      }
+      acc[reward.reward_state].push(formattedReward);
+      return acc;
+    }, {});
+
+    res
+      .status(200)
+      .send(HelperUtils.successObj("Rewards fetched successfully", groupedRewards));
+  } catch (err) {
+    console.error("Error fetching rewards:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to fetch rewards"));
+  }
+});
+
+
 
 module.exports = router;
 

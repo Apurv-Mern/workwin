@@ -11,9 +11,9 @@ const swaggerJsDoc = require('swagger-jsdoc');
 
 if (protcol == "https") {
     httpsOptions = module.exports = {
-       key: fs.readFileSync("/var/www/ssl_files/ssl_24.key"),
-       cert: fs.readFileSync("/var/www/ssl_files/ssl_24.cert"),
-       ca: fs.readFileSync("/var/www/ssl_files/ca_24.cert"),
+        key: fs.readFileSync("/var/www/ssl_files/ssl_24.key"),
+        cert: fs.readFileSync("/var/www/ssl_files/ssl_24.cert"),
+        ca: fs.readFileSync("/var/www/ssl_files/ca_24.cert"),
     };
     console.log('httpsOptions :>> ', httpsOptions);
     console.log("https Server Started2");
@@ -26,7 +26,9 @@ if (protcol == "https") {
 const { connectToDatabase } = require("./startup/database");
 connectToDatabase();
 
-// Add this to parse form bodies like newPassword, confirmPassword
+// Serve static files from the "uploads" folder
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 app.use(express.urlencoded({ extended: true })); // ✅ Add this line
 app.use(express.json()); // optional, good for parsing JSON bodies
 

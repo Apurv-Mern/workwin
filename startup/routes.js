@@ -20,4 +20,4 @@ module.exports = function (app) {
     console.log("route loaded");
     app.use(error);
 }
- 
+

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node --watch index.js"
+    "start": "node --watch index.js",
+    "dev": "nodemon index.js"
   },
   "keywords": [],
   "author": "",
@@ -36,13 +37,7 @@
     "tiktoken": "^1.0.18",
     "xlsx": "^0.18.5"
   },
-  "nodemonConfig": {
-    "watch": [
-      "index.js",
-      "src/"
-    ]
-  },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.10"
   }
 }

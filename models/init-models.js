@@ -13,6 +13,8 @@ const _UserLevel = require("./UserLevel");
 const _UserAttribute = require("./UserAttribute");
 const _LevelDefinition = require("./LevelDefinition");
 const _Weights = require("./Weights");
+const _Rewards = require("./Rewards");
+const _EmployeeXpResults = require("./EmployeeXpResults");
 
 function initModels(sequelize) {
   const Permissions = _Permissions.init(sequelize, DataTypes);
@@ -27,6 +29,8 @@ function initModels(sequelize) {
   const UserAttribute = _UserAttribute.init(sequelize, DataTypes);
   const LevelDefinition = _LevelDefinition.init(sequelize, DataTypes);
   const Weights = _Weights.init(sequelize, DataTypes);
+  const Rewards = _Rewards.init(sequelize, DataTypes);
+  const EmployeeXpResults = _EmployeeXpResults.init(sequelize, DataTypes);
 
   // Define relationships
   RolePermissions.belongsTo(Permissions, {
@@ -95,6 +99,8 @@ function initModels(sequelize) {
     UserAttribute,
     LevelDefinition,
     Weights,
+    Rewards,
+    EmployeeXpResults
   };
 }
 

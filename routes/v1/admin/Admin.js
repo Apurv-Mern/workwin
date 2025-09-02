@@ -11,6 +11,8 @@ const {
   UserRoles,
   RolePermissions,
   Weights,
+  Rewards,
+  EmployeeXpResults
 } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
 const jwt = require("jsonwebtoken");
@@ -756,11 +758,11 @@ router.post("/xp/calculate-daily", adminAuthMiddleware, async (req, res) => {
     for (const attr of attributes) {
       const xp = Math.round(
         50 *
-          (0.15 * (attr.attendance / 100) +
-            0.15 * (attr.punctuality / 100) +
-            0.2 * (attr.communication / 100) +
-            0.25 * (attr.cooperation / 100) +
-            0.25 * (attr.ownership / 100))
+        (0.15 * (attr.attendance / 100) +
+          0.15 * (attr.punctuality / 100) +
+          0.2 * (attr.communication / 100) +
+          0.25 * (attr.cooperation / 100) +
+          0.25 * (attr.ownership / 100))
       );
 
       await UserXpLog.create({
@@ -887,6 +889,9 @@ router.get("/all-users", adminAuthMiddleware, async (req, res) => {
           ],
         },
       ],
+      where: {
+        isDeleted: 0,
+      },
     });
 
     const formattedUsers = users.map((user) => ({
@@ -894,6 +899,7 @@ router.get("/all-users", adminAuthMiddleware, async (req, res) => {
       name: user.name,
       email: user.email,
       status: user.status,
+      employerCode: user.employerCode,
       roles: user.Roles.map((role) => ({
         id: role.id,
         name: role.name,
@@ -966,12 +972,10 @@ router.delete("/users/:id", adminAuthMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).send(HelperUtils.errorObj("User not found"));
     }
-
+    console.log({ id });
     await user.update({ isDeleted: 1 });
 
-    res
-      .status(200)
-      .send(HelperUtils.successObj("User deleted successfully", user));
+    res.status(200).send(HelperUtils.successObj("User deleted successfully"));
   } catch (err) {
     console.error("Error deleting user:", err);
     res.status(500).send(HelperUtils.errorObj("Failed to delete user"));
@@ -1095,9 +1099,18 @@ router.get(
 // Save User Weights
 router.post("/users/weights", adminAuthMiddleware, async (req, res) => {
   try {
-    const { attendance, punctuality, shift_compliance, consistency } = req.body;
-
-    const existingWeights = await Weights.findOne();
+    const { emp_Id, attendance, punctuality, shift_compliance, consistency } =
+      req.body;
+    console.log({
+      emp_Id,
+      attendance,
+      punctuality,
+      shift_compliance,
+      consistency,
+    });
+    const existingWeights = await Weights.findOne({
+      where: { emp_Id },
+    });
 
     let attributes;
 
@@ -1110,6 +1123,7 @@ router.post("/users/weights", adminAuthMiddleware, async (req, res) => {
       });
     } else {
       attributes = await Weights.create({
+        emp_Id,
         attendance,
         punctuality,
         shift_compliance,
@@ -1134,9 +1148,17 @@ router.post("/users/weights", adminAuthMiddleware, async (req, res) => {
 });
 
 // Get User Weights
-router.get("/users/weights", adminAuthMiddleware, async (req, res) => {
+router.get("/users/weights/:emp_Id", adminAuthMiddleware, async (req, res) => {
   try {
-    const attributes = await Weights.findAll();
+    const { emp_Id } = req.params;
+    if (!emp_Id) {
+      return res
+        .status(400)
+        .send(HelperUtils.errorObj("Employee ID is required"));
+    }
+    const attributes = await Weights.findAll({
+      where: { emp_Id },
+    });
 
     res
       .status(200)
@@ -1149,40 +1171,10 @@ router.get("/users/weights", adminAuthMiddleware, async (req, res) => {
   }
 });
 
-// XP Calculation Logic
-const calculateXP = (row) => {
-  const weights = {
-    attendance: 0.3,
-    punctuality: 0.2,
-    completion: 0.2,
-    consistency: 0.3,
-  };
-  console.log({ row });
-  // Calculate each attribute score as percentage (0-100)
-  const attendanceScore =
-    (row["Attendance Approved Shifts"] || 0) / (row["Expected Shifts"] || 1);
-  const punctualityScore =
-    (row["Punctuality On-Time Shifts"] || 0) / (row["Approved Shifts"] || 1);
-  const completionScore =
-    (row["Shift Completion Completed Shifts"] || 0) /
-    (row["Assigned Shifts"] || 1);
-  const consistencyScore =
-    (row["Consistency (Streaks) Streak Days"] || 0) /
-    (row["Max Possible Streak"] || 1);
-
-  // Calculate weighted XP (capped at 50)
-  const xp =
-    50 *
-    (weights.attendance * attendanceScore +
-      weights.punctuality * punctualityScore +
-      weights.completion * completionScore +
-      weights.consistency * consistencyScore);
-
-  return Math.min(50, Math.round(xp));
-};
-
-// Excel upload Calculation
+// Upload Excel File
 router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
+  const transaction = await sequelize.transaction();
+
   try {
     if (!req.file) {
       return res
@@ -1193,54 +1185,605 @@ router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
     const filePath = req.file.path;
     const workbook = XLSX.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
-    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-      header: 1,
-    });
-    console.log({ rawData });
-    // Process headers - combine main and subheaders
-    const headers = rawData[0].map((h, i) => {
-      const mainHeader = h || "";
-      const subHeader = rawData[1][i] || "";
-      return `${mainHeader} ${subHeader}`.trim();
-    });
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
-    // Process user data
-    const users = rawData
-      .slice(2)
-      .filter((row) => row[0])
-      .map((row) => {
-        const userData = Object.fromEntries(
-          row.map((value, index) => [headers[index], value])
-        );
+    const hasValue = (value) => {
+      return value !== null && value !== undefined && value !== "";
+    };
 
-        return {
-          name: userData["Name"],
-          email: userData["Email"],
-          xp: calculateXP(userData),
-        };
+    // Updated XP calculation with refined penalty logic
+    const calculateXP = (employeeData, multiplier = 1) => {
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const xpPerDay = 2500;
+      const penaltyXP = -1000;
+      let baseXP = 0;
+      let attendanceDetails = {};
+      let perfectAttendance = true;
+
+      days.forEach((day) => {
+        const inTime = employeeData[`${day}_In`];
+        const outTime = employeeData[`${day}_Out`];
+
+        if (hasValue(inTime) && hasValue(outTime)) {
+          baseXP += xpPerDay;
+          attendanceDetails[day.toLowerCase()] = {
+            present: true,
+            hours: employeeData[`${day}_Hours`] || 0
+          };
+        } else {
+          attendanceDetails[day.toLowerCase()] = {
+            present: false,
+            hours: 0
+          };
+          perfectAttendance = false;
+        }
       });
 
-    // Save users to the users_attributes table
+      // Apply multiplier to base XP
+      let totalXP = baseXP * multiplier;
 
-    // Clean up - delete the uploaded file after processing
-    // fs.unlinkSync(filePath);
+      // Apply penalty ONLY if:
+      // 1. Not perfect attendance (missing some days)
+      // 2. Has some base XP (baseXP > 0)
+      let penaltyApplied = 0;
+      if (!perfectAttendance && baseXP > 0) {
+        totalXP += penaltyXP;
+        penaltyApplied = penaltyXP;
+      }
+
+      // Ensure XP cannot be negative
+      if (totalXP < 0) {
+        totalXP = 0;
+      }
+
+      return {
+        baseXP,
+        totalXP,
+        attendanceDetails,
+        perfectAttendance,
+        penaltyApplied,
+        multiplierUsed: multiplier
+      };
+    };
+
+    // Function to calculate streak within a week
+    const calculateCurrentWeekStreak = (attendanceDetails) => {
+      const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      let maxStreak = 0;
+      let currentStreak = 0;
+
+      for (const day of daysOrder) {
+        if (attendanceDetails[day] && attendanceDetails[day].present) {
+          currentStreak += 1;
+          maxStreak = Math.max(maxStreak, currentStreak);
+        } else {
+          currentStreak = 0;
+        }
+      }
+
+      return maxStreak;
+    };
+
+    // Function to calculate overall streak (considering previous weeks)
+    const calculateOverallStreak = async (personId, currentWeekAttendance, existingRecord, transaction) => {
+      const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
+
+      if (!existingRecord) {
+        return {
+          currentStreak: currentWeekStreak,
+          maxStreak: currentWeekStreak
+        };
+      }
+
+      const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
+      let lastDayPresent = false;
+
+      for (const day of previousDaysOrder) {
+        const dayPresent = existingRecord[`${day}_present`];
+        if (dayPresent !== null) {
+          lastDayPresent = dayPresent;
+          break;
+        }
+      }
+
+      let newCurrentStreak;
+      if (lastDayPresent && currentWeekAttendance.sun.present) {
+        newCurrentStreak = existingRecord.current_streak + currentWeekStreak;
+      } else if (currentWeekStreak > 0) {
+        newCurrentStreak = currentWeekStreak;
+      } else {
+        newCurrentStreak = 0;
+      }
+
+      const newMaxStreak = Math.max(existingRecord.max_streak, newCurrentStreak);
+
+      return {
+        currentStreak: newCurrentStreak,
+        maxStreak: newMaxStreak
+      };
+    };
+
+    const weekStartDate = req.body.weekStartDate || null;
+    const weekEndDate = req.body.weekEndDate || null;
+    const uploadedBy = req.user?.id || null;
+
+    for (const row of rawData.filter(r => r.Person)) {
+      const empCode = row.EmployeeCode || row.emp_code;
+      const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
+
+      // Check if record already exists for this person
+      const existingRecord = await EmployeeXpResults.findOne({
+        where: {
+          emp_code: empCode
+        },
+        order: [["upload_date", "DESC"]],
+        transaction
+      });
+
+      // Get multiplier from existing record or default to 1
+      const currentMultiplier = existingRecord ? existingRecord.multiplier : 1;
+
+      // Calculate XP with current multiplier
+      const xpCalculation = calculateXP(row, currentMultiplier);
+
+      // Calculate streak
+      const streakData = await calculateOverallStreak(
+        parseInt(row.Person),
+        xpCalculation.attendanceDetails,
+        existingRecord,
+        transaction
+      );
+
+      // console.log({
+      //   person_id: row.Person,
+      //   baseXP: xpCalculation.baseXP,
+      //   multiplier: currentMultiplier,
+      //   totalXP: xpCalculation.totalXP,
+      //   perfectAttendance: xpCalculation.perfectAttendance,
+      //   penaltyApplied: xpCalculation.penaltyApplied,
+      //   penaltySkipped: !xpCalculation.perfectAttendance && xpCalculation.baseXP === 0
+      // });
+
+      if (existingRecord) {
+        // If record exists, update all data but ADD XP to existing XP
+        const newTotalXP = existingRecord.total_xp + xpCalculation.totalXP;
+
+        await existingRecord.update({
+          firstname: row.Firstname,
+          surname: row.Surname,
+          full_name: fullName,
+          emp_code: empCode,
+          email: row.Email,
+          location: row.locationName,
+          client: row.ClientName,
+
+          // ADD current week's XP (with multiplier and penalty logic) to existing XP
+          total_xp: newTotalXP,
+
+          // Keep existing multiplier
+          // multiplier: currentMultiplier, // This stays the same
+
+          // Update streak information
+          current_streak: streakData.currentStreak,
+          max_streak: streakData.maxStreak,
+
+          total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+          total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
+
+          // Update daily attendance flags for current week
+          sunday_present: xpCalculation.attendanceDetails.sun.present,
+          monday_present: xpCalculation.attendanceDetails.mon.present,
+          tuesday_present: xpCalculation.attendanceDetails.tue.present,
+          wednesday_present: xpCalculation.attendanceDetails.wed.present,
+          thursday_present: xpCalculation.attendanceDetails.thu.present,
+          friday_present: xpCalculation.attendanceDetails.fri.present,
+          saturday_present: xpCalculation.attendanceDetails.sat.present,
+
+          // Update daily hours for current week
+          sunday_hours: xpCalculation.attendanceDetails.sun.hours,
+          monday_hours: xpCalculation.attendanceDetails.mon.hours,
+          tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
+          wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
+          thursday_hours: xpCalculation.attendanceDetails.thu.hours,
+          friday_hours: xpCalculation.attendanceDetails.fri.hours,
+          saturday_hours: xpCalculation.attendanceDetails.sat.hours,
+
+          upload_date: new Date(),
+          week_start_date: weekStartDate,
+          week_end_date: weekEndDate,
+          uploaded_by: uploadedBy
+        }, { transaction });
+
+      } else {
+        await EmployeeXpResults.create({
+          person_id: parseInt(row.Person),
+          firstname: row.Firstname,
+          surname: row.Surname,
+          full_name: fullName,
+          emp_code: empCode,
+          email: row.Email,
+          location: row.locationName,
+          client: row.ClientName,
+          total_xp: xpCalculation.totalXP,
+
+          // Set default multiplier for new employees
+          multiplier: 1,
+
+          current_streak: streakData.currentStreak,
+          max_streak: streakData.maxStreak,
+
+          total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+          total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
+
+          // Daily attendance flags
+          sunday_present: xpCalculation.attendanceDetails.sun.present,
+          monday_present: xpCalculation.attendanceDetails.mon.present,
+          tuesday_present: xpCalculation.attendanceDetails.tue.present,
+          wednesday_present: xpCalculation.attendanceDetails.wed.present,
+          thursday_present: xpCalculation.attendanceDetails.thu.present,
+          friday_present: xpCalculation.attendanceDetails.fri.present,
+          saturday_present: xpCalculation.attendanceDetails.sat.present,
+
+          // Daily hours
+          sunday_hours: xpCalculation.attendanceDetails.sun.hours,
+          monday_hours: xpCalculation.attendanceDetails.mon.hours,
+          tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
+          wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
+          thursday_hours: xpCalculation.attendanceDetails.thu.hours,
+          friday_hours: xpCalculation.attendanceDetails.fri.hours,
+          saturday_hours: xpCalculation.attendanceDetails.sat.hours,
+
+          upload_date: new Date(),
+          week_start_date: weekStartDate,
+          week_end_date: weekEndDate,
+          uploaded_by: uploadedBy
+        }, { transaction });
+      }
+    }
+
+    await transaction.commit();
+    res.status(200).json({
+      success: true,
+      message: "Data saved successfully to database",
+      xpCalculation: {
+        formula: "XP = ((Base XP × Multiplier) - 1000 penalty) >= 0",
+        description: "Base XP is multiplied by multiplier. Penalty (-1000) applies only if employee has some XP and missed days. Final XP cannot be negative.",
+        xpPerDay: 2500,
+        penaltyPerWeek: -1000,
+        defaultMultiplier: 1,
+        rules: [
+          "Perfect attendance: No penalty",
+          "Missing days + has XP: -1000 penalty",
+          "Missing days + no XP: No penalty",
+          "Final XP cannot be negative"
+        ],
+        examples: {
+          "0 days present": "0 XP (no penalty applied)",
+          "2 days present": "(2 × 2500 × 1) - 1000 = 4000 XP",
+          "1 day present": "(1 × 2500 × 1) - 1000 = 1500 XP",
+          "7 days present": "7 × 2500 × 1 = 17500 XP (no penalty)"
+        }
+      },
+      streakCalculation: {
+        description: "Streak counts consecutive days of attendance. Resets when a day is missed.",
+        example: "If employee comes Sun, Mon, Tue, Wed then streak = 4"
+      },
+    });
+
+  } catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to process Excel file and save to database",
+      error: err.message
+    });
+  }
+});
+
+// Get ExcelAttendence Data
+router.get("/users/xp-records", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const offset = (page - 1) * pageSize;
+
+    // Optional filters
+    const whereClause = {};
+    if (req.query.location) whereClause.location = { [Op.like]: `%${req.query.location}%` };
+    if (req.query.client) whereClause.client = { [Op.like]: `%${req.query.client}%` };
+    if (req.query.week_start_date) whereClause.week_start_date = req.query.week_start_date;
+
+    const { count, rows } = await EmployeeXpResults.findAndCountAll({
+      where: whereClause,
+      limit: pageSize,
+      offset: offset,
+      order: [['total_xp', 'DESC']],
+    });
+
+    const totalPages = Math.ceil(count / pageSize);
+
+    const allRecords = await EmployeeXpResults.findAll({
+      where: whereClause,
+    });
+
+    const statistics = {
+      highestXP: allRecords.length > 0 ? Math.max(...allRecords.map(r => r.total_xp)) : 0,
+      lowestXP: allRecords.length > 0 ? Math.min(...allRecords.map(r => r.total_xp)) : 0,
+      averageXP: allRecords.length > 0 ? Math.round(
+        allRecords.reduce((sum, r) => sum + r.total_xp, 0) / allRecords.length
+      ) : 0,
+      totalEmployees: count
+    };
 
     res.status(200).json({
       success: true,
-      users,
-      formula: "XP = 50 × ∑(Wᵢ × (Attribute Scoreᵢ / 100))",
-      weights: {
-        attendance: 0.3,
-        punctuality: 0.2,
-        completion: 0.2,
-        consistency: 0.3,
+      data: rows,
+      pagination: {
+        currentPage: page,
+        pageSize: pageSize,
+        totalPages: totalPages,
+        totalRecords: count,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1
       },
+      xpCalculation: {
+        formula: "XP = 2500 × Number of Days Present (Cumulative across weeks)",
+        description: "Employee gets 2500 XP for each day they have both check-in and check-out entries. XP accumulates weekly.",
+        xpPerDay: 2500,
+        maxWeeklyXP: 17500,
+      },
+      statistics: statistics
     });
+
   } catch (err) {
     console.error("Error:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to process Excel file" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve employee records",
+      error: err.message
+    });
   }
 });
+
+router.post(
+  "/rewards/create",
+  adminAuthMiddleware,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const { name, description, reward_state } = req.body;
+      const file = req.file;
+      if (!name) {
+        return res.status(400).send(HelperUtils.errorObj("Name is required"));
+      }
+
+      const reward = await Rewards.create({
+        name,
+        description,
+        reward_state,
+        filename: file ? file.filename : null,
+      });
+
+      res
+        .status(201)
+        .send(HelperUtils.successObj("Reward created successfully", reward));
+    } catch (err) {
+      console.error("Error creating reward:", err);
+      res.status(500).send(HelperUtils.errorObj("Failed to create reward"));
+    }
+  }
+);
+
+// Get All Rewards
+router.get("/rewards", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { reward_state } = req.query;
+
+    const whereClause = reward_state ? { reward_state } : {};
+
+    const rewards = await Rewards.findAll({
+      where: whereClause,
+      attributes: [
+        "id",
+        "name",
+        "description",
+        "reward_state",
+        "filename",
+        "winner_id",
+      ],
+    });
+
+    const formattedRewards = rewards.map((reward) => ({
+      id: reward.id,
+      name: reward.name,
+      description: reward.description,
+      reward_state: reward.reward_state,
+      filename: reward.filename
+        ? `https://workwin.24livehost.com:3025/uploads/${reward.filename}`
+        : null,
+      winner_id: reward.winner_id ? reward.winner_id : null,
+    }));
+
+    res
+      .status(200)
+      .send(
+        HelperUtils.successObj("Rewards fetched successfully", formattedRewards)
+      );
+  } catch (err) {
+    console.error("Error fetching rewards:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to fetch rewards"));
+  }
+});
+
+// update Reward
+router.put(
+  "/rewards/:id",
+  adminAuthMiddleware,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, description, reward_state } = req.body;
+      const file = req.file;
+
+      const reward = await Rewards.findByPk(id);
+      if (!reward) {
+        return res.status(404).send(HelperUtils.errorObj("Reward not found"));
+      }
+
+      await reward.update({
+        name,
+        description,
+        reward_state,
+        filename: file ? file.filename : reward.filename,
+      });
+
+      res
+        .status(200)
+        .send(HelperUtils.successObj("Reward updated successfully", reward));
+    } catch (err) {
+      console.error("Error updating reward:", err);
+      res.status(500).send(HelperUtils.errorObj("Failed to update reward"));
+    }
+  }
+);
+
+// Delete Reward
+router.delete("/rewards/:id", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reward = await Rewards.findByPk(id);
+    if (!reward) {
+      return res.status(404).send(HelperUtils.errorObj("Reward not found"));
+    }
+
+    await reward.destroy();
+
+    res.status(200).send(HelperUtils.successObj("Reward deleted successfully"));
+  } catch (err) {
+    console.error("Error deleting reward:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to delete reward"));
+  }
+});
+
+router.get("/leaderboard", adminAuthMiddleware, async (req, res) => {
+  try {
+    const leaderboardUsers = await Users.findAll({
+      include: [
+        {
+          model: Roles,
+          as: "Roles",
+          where: { name: "User" },
+          through: { attributes: [] },
+          attributes: [], // ✅ Do not return Roles in result
+        },
+      ],
+      attributes: ["id", "name", "email", "curr_levels", "totalUserXp"],
+      order: [["totalUserXp", "DESC"]],
+      // limit: 10
+    });
+
+    res
+      .status(200)
+      .send(
+        HelperUtils.successObj(
+          "Leaderboard fetch successfully.",
+          leaderboardUsers
+        )
+      );
+  } catch (err) {
+    console.error("Error in leaderboard API:", err);
+    res.status(500).send(HelperUtils.errorObj("Something went wrong"));
+  }
+});
+
+// Assign reward to the user
+router.post("/rewards/assign", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { userId, rewardId } = req.body;
+
+    if (!rewardId) {
+      return res
+        .status(400)
+        .send(HelperUtils.errorObj("Reward ID are required"));
+    }
+
+    if (userId !== null) {
+      const user = await Users.findByPk(userId);
+      if (!user) {
+        return res.status(404).send(HelperUtils.errorObj("User not found"));
+      }
+
+      const reward = await Rewards.findByPk(rewardId);
+      if (!reward) {
+        return res.status(404).send(HelperUtils.errorObj("Reward not found"));
+      }
+
+      // Check if the user already has this reward
+      const existingReward = await Rewards.findOne({
+        where: { winner_id: userId, id: rewardId },
+      });
+      if (existingReward) {
+        return res
+          .status(400)
+          .send(HelperUtils.errorObj("User already has this reward"));
+      }
+    }
+
+    // Assign the reward to the user
+    await Rewards.update(
+      {
+        winner_id: userId,
+      },
+      {
+        where: {
+          id: rewardId,
+        },
+      }
+    );
+
+    res
+      .status(200)
+      .send(HelperUtils.successObj("Reward assigned successfully"));
+  } catch (err) {
+    console.error("Error assigning reward:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to assign reward"));
+  }
+});
+
+router.get(
+  "/progress-report/:userId",
+  adminAuthMiddleware,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const userRewards = await Rewards.findAll({
+        where: { winner_id: userId },
+      });
+
+      const userDetails = await Users.findByPk(userId, {
+        attributes: ["id", "name", "email", "curr_levels", "totalUserXp"],
+      });
+
+      res
+        .status(200)
+        .send(
+          HelperUtils.successObj("Progress fetched successfully", {
+            userDetails,
+            userRewards,
+          })
+        );
+    } catch (err) {
+      console.error("Error fetching user progress:", err);
+      res
+        .status(500)
+        .send(HelperUtils.errorObj("Failed to fetch user progress"));
+    }
+  }
+);
+
 module.exports = router;
