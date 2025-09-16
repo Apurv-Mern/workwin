@@ -18,3 +18,5 @@ export const updateReward = "admin/rewards";
 export const deleteReward = "admin/rewards";
 export const assignRewards = "admin/rewards/assign";
 export const progressReport = "admin/progress-report";
+export const wheelSaveConfiguration = "admin/wheel/save-configuration";
+export const wheelGetConfiguration = "admin/wheel/configuration";

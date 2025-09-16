@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import { Navbar, Nav, Container, Button, Dropdown } from "react-bootstrap";
+import {
+  Navbar,
+  Nav,
+  Container,
+  Button,
+  Dropdown,
+  Form,
+} from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import { logout } from "../store/slices/authSlice";
 import { usePermissions } from "../utils/handlePermissions";
@@ -19,6 +26,8 @@ const AdminLayout: React.FC = () => {
     window.innerWidth < 992
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [wheelSections, setWheelSections] = useState(8);
+  const [xpPerSection, setXpPerSection] = useState(100);
 
   const toggleSidebar = () => {
     const newCollapsedState = !sidebarCollapsed;
@@ -228,6 +237,22 @@ const AdminLayout: React.FC = () => {
                 <span className={sidebarCollapsed ? "d-none" : ""}>Reward</span>
               </LinkNavItem>
             )}
+
+            <LinkNavItem
+              as={Link}
+              to="/mini-spin-wheel"
+              className={`py-3 ${
+                location.pathname === "/mini-spin-wheel"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
+            >
+              <i className="bi bi-arrow-clockwise me-3"></i>
+              <span className={sidebarCollapsed ? "d-none" : ""}>
+                Mini Spin the Wheel
+              </span>
+            </LinkNavItem>
+
             {/* 
             <LinkNavItem
               as={Link}

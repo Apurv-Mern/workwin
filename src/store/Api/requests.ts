@@ -21,6 +21,8 @@ import {
   deleteUsers,
   assignRewards,
   progressReport,
+  wheelSaveConfiguration,
+  wheelGetConfiguration,
 } from "./endpoints";
 
 // Define the API requests
@@ -249,6 +251,32 @@ export const getProgressReportRequest = async (id: any) => {
   try {
     const { userId } = id;
     const response = await api.get(`${progressReport}/${userId}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export interface WheelConfigurationData {
+  sections: number;
+  xpValues: number[];
+  totalXP: number;
+}
+
+export const saveWheelConfigurationRequest = async (
+  data: WheelConfigurationData
+) => {
+  try {
+    const response = await api.post(wheelSaveConfiguration, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const getWheelConfigurationRequest = async () => {
+  try {
+    const response = await api.get(wheelGetConfiguration);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
