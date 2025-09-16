@@ -4,7 +4,7 @@ const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Season, Rewards } = ModelsData;
+const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Season, Rewards, EmployeeXpResults } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
 // const HelperOpenAi = require("./../../../utils/openAiHelper");
 const jwt = require("jsonwebtoken");
@@ -649,7 +649,7 @@ router.get('/level', userAuthMiddleware, async (req, res) => {
 // POST /user/xp/claim-mini-game
 router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
   try {
-    const { gameType, score, xp, description } = req.body;
+    const { gameType, score, highscore, xp, description } = req.body;
     const userId = req.user.userId;
 
     if (!gameType || typeof xp !== 'number') {
@@ -684,9 +684,9 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       }
     });
 
-    if ((todayXpTotal || 0) + xp > 50) {
-      return res.status(403).send(HelperUtils.errorObj("Daily XP cap of 50 for mini-games reached."));
-    }
+    // if ((todayXpTotal || 0) + xp > 50) {
+    //   return res.status(403).send(HelperUtils.errorObj("Daily XP cap of 50 for mini-games reached."));
+    // }
 
     //  Log XP
     await UserXpLog.create({
@@ -696,6 +696,8 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       season_id: season?.id,
       xp,
       date: today,
+      highscore,
+      score,
       description: description || `Played ${gameType}, score ${score}`
     });
 
@@ -808,7 +810,125 @@ router.get("/rewards", userAuthMiddleware, async (req, res) => {
   }
 });
 
+// Get Attendance Data grouped by month
+router.get("/attendance", userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
 
+    let empCode = await Users.findOne({
+      where: { id: userId },
+      attributes: ["userCode"],
+    });
+
+    empCode = empCode?.userCode;
+    if (!empCode) {
+      return res.status(401).send(HelperUtils.errorObj("Employee code missing from user session"));
+    }
+
+    const attendanceRecords = await EmployeeXpResults.findAll({
+      where: { emp_code: empCode },
+      attributes: [
+        "id",
+        "week_start_date",
+        "week_end_date",
+        "total_days_present",
+        "current_streak",
+        "max_streak",
+        "total_xp",
+        "multiplier",
+        "total_hours",
+        "sunday_present",
+        "monday_present",
+        "tuesday_present",
+        "wednesday_present",
+        "thursday_present",
+        "friday_present",
+        "saturday_present",
+
+      ],
+      order: [["week_start_date", "DESC"]]
+    });
+
+    // Group data by week_start_date
+    const groupedData = attendanceRecords.map((record, index) => {
+      // Check if current_streak is a multiple of 7 and greater than 0
+      const isGameUnlocked = record.current_streak > 0 && record.current_streak % 7 === 0;
+
+      const formattedRecord = {
+        id: record.id,
+        week_start_date: record.week_start_date,
+        week_end_date: record.week_end_date,
+        total_days_present: record.total_days_present,
+        current_streak: record.current_streak,
+        max_streak: record.max_streak,
+        total_xp: record.total_xp,
+        multiplier: record.multiplier,
+        total_hours: parseFloat(record.total_hours) || 0,
+        isSundayPresent: Boolean(record.sunday_present),
+        isMondayPresent: Boolean(record.monday_present),
+        isTuesdayPresent: Boolean(record.tuesday_present),
+        isWednesdayPresent: Boolean(record.wednesday_present),
+        isThursdayPresent: Boolean(record.thursday_present),
+        isFridayPresent: Boolean(record.friday_present),
+        isSaturdayPresent: Boolean(record.saturday_present),
+        gameUnlocked: isGameUnlocked
+      };
+      return formattedRecord;
+    });
+
+
+    res.status(200).send(HelperUtils.successObj("Attendance data fetched successfully", groupedData));
+
+  } catch (err) {
+    console.error("Error fetching attendance:", err);
+    res.status(500).send(HelperUtils.errorObj("Failed to fetch attendance data"));
+  }
+});
+
+// Spin the wheel
+router.get("/wheel/configuration", userAuthMiddleware, async (req, res) => {
+  try {
+    // Get the global wheel configuration set by admin
+    const wheelConfig = await WheelConfiguration.findOne({
+      where: {
+        is_global: true,
+        is_active: true
+      },
+      attributes: [
+        'id',
+        'number_of_sections',
+        'sections',
+        'total_xp_pool',
+        'is_active'
+      ]
+    });
+
+    if (!wheelConfig) {
+      return res.status(404).send(
+        HelperUtils.errorObj("No wheel configuration available. Please contact admin.")
+      );
+    }
+
+    // Format the response (limited info for users)
+    const formattedConfig = {
+      id: wheelConfig.id,
+      numberOfSections: wheelConfig.number_of_sections,
+      sections: JSON.parse(wheelConfig.sections),
+      totalXpPool: wheelConfig.total_xp_pool,
+      isActive: wheelConfig.is_active
+    };
+
+    res.status(200).send(
+      HelperUtils.successObj("Wheel configuration retrieved successfully", formattedConfig)
+    );
+
+  } catch (err) {
+    console.error("Error fetching wheel configuration:", err);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch wheel configuration")
+    );
+  }
+});
 
 module.exports = router;
 

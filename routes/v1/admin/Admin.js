@@ -12,7 +12,8 @@ const {
   RolePermissions,
   Weights,
   Rewards,
-  EmployeeXpResults
+  EmployeeXpResults,
+  SpinTheWheel
 } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
 const jwt = require("jsonwebtoken");
@@ -24,6 +25,7 @@ const TOKEN_EXPIRY = "1d";
 const { Op } = require("sequelize");
 const upload = require("../../../middleware/fileUpload");
 const XLSX = require("xlsx");
+const c = require("config");
 
 router.post("/admin_login", async (req, res) => {
   const { email, password } = req.body;
@@ -1171,383 +1173,6 @@ router.get("/users/weights/:emp_Id", adminAuthMiddleware, async (req, res) => {
   }
 });
 
-// Upload Excel File
-router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
-  const transaction = await sequelize.transaction();
-
-  try {
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No file uploaded" });
-    }
-
-    const filePath = req.file.path;
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-    const hasValue = (value) => {
-      return value !== null && value !== undefined && value !== "";
-    };
-
-    // Updated XP calculation with refined penalty logic
-    const calculateXP = (employeeData, multiplier = 1) => {
-      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      const xpPerDay = 2500;
-      const penaltyXP = -1000;
-      let baseXP = 0;
-      let attendanceDetails = {};
-      let perfectAttendance = true;
-
-      days.forEach((day) => {
-        const inTime = employeeData[`${day}_In`];
-        const outTime = employeeData[`${day}_Out`];
-
-        if (hasValue(inTime) && hasValue(outTime)) {
-          baseXP += xpPerDay;
-          attendanceDetails[day.toLowerCase()] = {
-            present: true,
-            hours: employeeData[`${day}_Hours`] || 0
-          };
-        } else {
-          attendanceDetails[day.toLowerCase()] = {
-            present: false,
-            hours: 0
-          };
-          perfectAttendance = false;
-        }
-      });
-
-      // Apply multiplier to base XP
-      let totalXP = baseXP * multiplier;
-
-      // Apply penalty ONLY if:
-      // 1. Not perfect attendance (missing some days)
-      // 2. Has some base XP (baseXP > 0)
-      let penaltyApplied = 0;
-      if (!perfectAttendance && baseXP > 0) {
-        totalXP += penaltyXP;
-        penaltyApplied = penaltyXP;
-      }
-
-      // Ensure XP cannot be negative
-      if (totalXP < 0) {
-        totalXP = 0;
-      }
-
-      return {
-        baseXP,
-        totalXP,
-        attendanceDetails,
-        perfectAttendance,
-        penaltyApplied,
-        multiplierUsed: multiplier
-      };
-    };
-
-    // Function to calculate streak within a week
-    const calculateCurrentWeekStreak = (attendanceDetails) => {
-      const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-      let maxStreak = 0;
-      let currentStreak = 0;
-
-      for (const day of daysOrder) {
-        if (attendanceDetails[day] && attendanceDetails[day].present) {
-          currentStreak += 1;
-          maxStreak = Math.max(maxStreak, currentStreak);
-        } else {
-          currentStreak = 0;
-        }
-      }
-
-      return maxStreak;
-    };
-
-    // Function to calculate overall streak (considering previous weeks)
-    const calculateOverallStreak = async (personId, currentWeekAttendance, existingRecord, transaction) => {
-      const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
-
-      if (!existingRecord) {
-        return {
-          currentStreak: currentWeekStreak,
-          maxStreak: currentWeekStreak
-        };
-      }
-
-      const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
-      let lastDayPresent = false;
-
-      for (const day of previousDaysOrder) {
-        const dayPresent = existingRecord[`${day}_present`];
-        if (dayPresent !== null) {
-          lastDayPresent = dayPresent;
-          break;
-        }
-      }
-
-      let newCurrentStreak;
-      if (lastDayPresent && currentWeekAttendance.sun.present) {
-        newCurrentStreak = existingRecord.current_streak + currentWeekStreak;
-      } else if (currentWeekStreak > 0) {
-        newCurrentStreak = currentWeekStreak;
-      } else {
-        newCurrentStreak = 0;
-      }
-
-      const newMaxStreak = Math.max(existingRecord.max_streak, newCurrentStreak);
-
-      return {
-        currentStreak: newCurrentStreak,
-        maxStreak: newMaxStreak
-      };
-    };
-
-    const weekStartDate = req.body.weekStartDate || null;
-    const weekEndDate = req.body.weekEndDate || null;
-    const uploadedBy = req.user?.id || null;
-
-    for (const row of rawData.filter(r => r.Person)) {
-      const empCode = row.EmployeeCode || row.emp_code;
-      const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
-
-      // Check if record already exists for this person
-      const existingRecord = await EmployeeXpResults.findOne({
-        where: {
-          emp_code: empCode
-        },
-        order: [["upload_date", "DESC"]],
-        transaction
-      });
-
-      // Get multiplier from existing record or default to 1
-      const currentMultiplier = existingRecord ? existingRecord.multiplier : 1;
-
-      // Calculate XP with current multiplier
-      const xpCalculation = calculateXP(row, currentMultiplier);
-
-      // Calculate streak
-      const streakData = await calculateOverallStreak(
-        parseInt(row.Person),
-        xpCalculation.attendanceDetails,
-        existingRecord,
-        transaction
-      );
-
-      // console.log({
-      //   person_id: row.Person,
-      //   baseXP: xpCalculation.baseXP,
-      //   multiplier: currentMultiplier,
-      //   totalXP: xpCalculation.totalXP,
-      //   perfectAttendance: xpCalculation.perfectAttendance,
-      //   penaltyApplied: xpCalculation.penaltyApplied,
-      //   penaltySkipped: !xpCalculation.perfectAttendance && xpCalculation.baseXP === 0
-      // });
-
-      if (existingRecord) {
-        // If record exists, update all data but ADD XP to existing XP
-        const newTotalXP = existingRecord.total_xp + xpCalculation.totalXP;
-
-        await existingRecord.update({
-          firstname: row.Firstname,
-          surname: row.Surname,
-          full_name: fullName,
-          emp_code: empCode,
-          email: row.Email,
-          location: row.locationName,
-          client: row.ClientName,
-
-          // ADD current week's XP (with multiplier and penalty logic) to existing XP
-          total_xp: newTotalXP,
-
-          // Keep existing multiplier
-          // multiplier: currentMultiplier, // This stays the same
-
-          // Update streak information
-          current_streak: streakData.currentStreak,
-          max_streak: streakData.maxStreak,
-
-          total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
-          total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
-
-          // Update daily attendance flags for current week
-          sunday_present: xpCalculation.attendanceDetails.sun.present,
-          monday_present: xpCalculation.attendanceDetails.mon.present,
-          tuesday_present: xpCalculation.attendanceDetails.tue.present,
-          wednesday_present: xpCalculation.attendanceDetails.wed.present,
-          thursday_present: xpCalculation.attendanceDetails.thu.present,
-          friday_present: xpCalculation.attendanceDetails.fri.present,
-          saturday_present: xpCalculation.attendanceDetails.sat.present,
-
-          // Update daily hours for current week
-          sunday_hours: xpCalculation.attendanceDetails.sun.hours,
-          monday_hours: xpCalculation.attendanceDetails.mon.hours,
-          tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
-          wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
-          thursday_hours: xpCalculation.attendanceDetails.thu.hours,
-          friday_hours: xpCalculation.attendanceDetails.fri.hours,
-          saturday_hours: xpCalculation.attendanceDetails.sat.hours,
-
-          upload_date: new Date(),
-          week_start_date: weekStartDate,
-          week_end_date: weekEndDate,
-          uploaded_by: uploadedBy
-        }, { transaction });
-
-      } else {
-        await EmployeeXpResults.create({
-          person_id: parseInt(row.Person),
-          firstname: row.Firstname,
-          surname: row.Surname,
-          full_name: fullName,
-          emp_code: empCode,
-          email: row.Email,
-          location: row.locationName,
-          client: row.ClientName,
-          total_xp: xpCalculation.totalXP,
-
-          // Set default multiplier for new employees
-          multiplier: 1,
-
-          current_streak: streakData.currentStreak,
-          max_streak: streakData.maxStreak,
-
-          total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
-          total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
-
-          // Daily attendance flags
-          sunday_present: xpCalculation.attendanceDetails.sun.present,
-          monday_present: xpCalculation.attendanceDetails.mon.present,
-          tuesday_present: xpCalculation.attendanceDetails.tue.present,
-          wednesday_present: xpCalculation.attendanceDetails.wed.present,
-          thursday_present: xpCalculation.attendanceDetails.thu.present,
-          friday_present: xpCalculation.attendanceDetails.fri.present,
-          saturday_present: xpCalculation.attendanceDetails.sat.present,
-
-          // Daily hours
-          sunday_hours: xpCalculation.attendanceDetails.sun.hours,
-          monday_hours: xpCalculation.attendanceDetails.mon.hours,
-          tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
-          wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
-          thursday_hours: xpCalculation.attendanceDetails.thu.hours,
-          friday_hours: xpCalculation.attendanceDetails.fri.hours,
-          saturday_hours: xpCalculation.attendanceDetails.sat.hours,
-
-          upload_date: new Date(),
-          week_start_date: weekStartDate,
-          week_end_date: weekEndDate,
-          uploaded_by: uploadedBy
-        }, { transaction });
-      }
-    }
-
-    await transaction.commit();
-    res.status(200).json({
-      success: true,
-      message: "Data saved successfully to database",
-      xpCalculation: {
-        formula: "XP = ((Base XP × Multiplier) - 1000 penalty) >= 0",
-        description: "Base XP is multiplied by multiplier. Penalty (-1000) applies only if employee has some XP and missed days. Final XP cannot be negative.",
-        xpPerDay: 2500,
-        penaltyPerWeek: -1000,
-        defaultMultiplier: 1,
-        rules: [
-          "Perfect attendance: No penalty",
-          "Missing days + has XP: -1000 penalty",
-          "Missing days + no XP: No penalty",
-          "Final XP cannot be negative"
-        ],
-        examples: {
-          "0 days present": "0 XP (no penalty applied)",
-          "2 days present": "(2 × 2500 × 1) - 1000 = 4000 XP",
-          "1 day present": "(1 × 2500 × 1) - 1000 = 1500 XP",
-          "7 days present": "7 × 2500 × 1 = 17500 XP (no penalty)"
-        }
-      },
-      streakCalculation: {
-        description: "Streak counts consecutive days of attendance. Resets when a day is missed.",
-        example: "If employee comes Sun, Mon, Tue, Wed then streak = 4"
-      },
-    });
-
-  } catch (err) {
-    if (transaction && !transaction.finished) {
-      await transaction.rollback();
-    }
-    console.error("Error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to process Excel file and save to database",
-      error: err.message
-    });
-  }
-});
-
-// Get ExcelAttendence Data
-router.get("/users/xp-records", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
-    const offset = (page - 1) * pageSize;
-
-    // Optional filters
-    const whereClause = {};
-    if (req.query.location) whereClause.location = { [Op.like]: `%${req.query.location}%` };
-    if (req.query.client) whereClause.client = { [Op.like]: `%${req.query.client}%` };
-    if (req.query.week_start_date) whereClause.week_start_date = req.query.week_start_date;
-
-    const { count, rows } = await EmployeeXpResults.findAndCountAll({
-      where: whereClause,
-      limit: pageSize,
-      offset: offset,
-      order: [['total_xp', 'DESC']],
-    });
-
-    const totalPages = Math.ceil(count / pageSize);
-
-    const allRecords = await EmployeeXpResults.findAll({
-      where: whereClause,
-    });
-
-    const statistics = {
-      highestXP: allRecords.length > 0 ? Math.max(...allRecords.map(r => r.total_xp)) : 0,
-      lowestXP: allRecords.length > 0 ? Math.min(...allRecords.map(r => r.total_xp)) : 0,
-      averageXP: allRecords.length > 0 ? Math.round(
-        allRecords.reduce((sum, r) => sum + r.total_xp, 0) / allRecords.length
-      ) : 0,
-      totalEmployees: count
-    };
-
-    res.status(200).json({
-      success: true,
-      data: rows,
-      pagination: {
-        currentPage: page,
-        pageSize: pageSize,
-        totalPages: totalPages,
-        totalRecords: count,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1
-      },
-      xpCalculation: {
-        formula: "XP = 2500 × Number of Days Present (Cumulative across weeks)",
-        description: "Employee gets 2500 XP for each day they have both check-in and check-out entries. XP accumulates weekly.",
-        xpPerDay: 2500,
-        maxWeeklyXP: 17500,
-      },
-      statistics: statistics
-    });
-
-  } catch (err) {
-    console.error("Error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to retrieve employee records",
-      error: err.message
-    });
-  }
-});
-
 router.post(
   "/rewards/create",
   adminAuthMiddleware,
@@ -1785,5 +1410,889 @@ router.get(
     }
   }
 );
+
+// Upload Excel File
+// router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
+//   const transaction = await sequelize.transaction();
+
+//   try {
+//     if (!req.file) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "No file uploaded" });
+//     }
+
+//     const filePath = req.file.path;
+//     const workbook = XLSX.readFile(filePath);
+//     const sheetName = workbook.SheetNames[0];
+//     const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+//     const hasValue = (value) => {
+//       return value !== null && value !== undefined && value !== "";
+//     };
+
+//     // Season bonus configuration
+//     const SEASON_BONUS_CONFIG = {
+//       milestones: [
+//         { weeks: 4, bonus: 250 },   // 4 weeks continuous = 250 XP
+//         { weeks: 8, bonus: 500 },   // 8 weeks continuous = 500 XP  
+//         { weeks: 12, bonus: 750 },  // 12 weeks continuous = 750 XP
+//         { weeks: 16, bonus: 1000 }, // 16 weeks continuous = 1000 XP
+//         { weeks: 20, bonus: 1000 }  // 20 weeks continuous = 1000 XP (5-week season bonus)
+//       ]
+//     };
+
+//     // Function to calculate season bonus XP
+//     const calculateSeasonBonus = (currentStreak, existingMilestones = []) => {
+//       let newBonusXP = 0;
+//       let newMilestones = [...existingMilestones];
+
+//       // Calculate how many weeks the current streak represents
+//       const streakWeeks = Math.floor(currentStreak / 7); // Assuming 7-day streaks = 1 week
+
+//       for (const milestone of SEASON_BONUS_CONFIG.milestones) {
+//         if (streakWeeks >= milestone.weeks && !newMilestones.includes(milestone.weeks)) {
+//           newBonusXP += milestone.bonus;
+//           newMilestones.push(milestone.weeks);
+//         }
+//       }
+
+//       return {
+//         bonusXP: newBonusXP,
+//         milestones: newMilestones
+//       };
+//     };
+
+//     // Updated XP calculation with refined penalty logic
+//     const calculateXP = (employeeData, multiplier = 1) => {
+//       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+//       const xpPerDay = 2500;
+//       const penaltyXP = -1000;
+//       let baseXP = 0;
+//       let attendanceDetails = {};
+//       let perfectAttendance = true;
+
+//       days.forEach((day) => {
+//         const inTime = employeeData[`${day}_In`];
+//         const outTime = employeeData[`${day}_Out`];
+
+//         if (hasValue(inTime) && hasValue(outTime)) {
+//           baseXP += xpPerDay;
+//           attendanceDetails[day.toLowerCase()] = {
+//             present: true,
+//             hours: employeeData[`${day}_Hours`] || 0
+//           };
+//         } else {
+//           attendanceDetails[day.toLowerCase()] = {
+//             present: false,
+//             hours: 0
+//           };
+//           perfectAttendance = false;
+//         }
+//       });
+
+//       // Apply multiplier to base XP
+//       let totalXP = baseXP * multiplier;
+
+//       // Apply penalty ONLY if: not perfect attendance and has base XP
+//       let penaltyApplied = 0;
+//       if (!perfectAttendance && baseXP > 0) {
+//         totalXP += penaltyXP;
+//         penaltyApplied = penaltyXP;
+//       }
+
+//       // Ensure XP cannot be negative
+//       if (totalXP < 0) {
+//         totalXP = 0;
+//       }
+
+//       return {
+//         baseXP,
+//         totalXP,
+//         attendanceDetails,
+//         perfectAttendance,
+//         penaltyApplied,
+//         multiplierUsed: multiplier
+//       };
+//     };
+
+//     // Function to calculate streak within a week
+//     const calculateCurrentWeekStreak = (attendanceDetails) => {
+//       const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+//       let maxStreak = 0;
+//       let currentStreak = 0;
+
+//       for (const day of daysOrder) {
+//         if (attendanceDetails[day] && attendanceDetails[day].present) {
+//           currentStreak += 1;
+//           maxStreak = Math.max(maxStreak, currentStreak);
+//         } else {
+//           currentStreak = 0;
+//         }
+//       }
+
+//       return maxStreak;
+//     };
+
+//     // Function to calculate overall streak (considering previous weeks)
+//     const calculateOverallStreak = async (empCode, currentWeekAttendance, transaction) => {
+//       const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
+
+//       // Get the most recent record for this employee
+//       const latestRecord = await EmployeeXpResults.findOne({
+//         where: { emp_code: empCode },
+//         order: [["upload_date", "DESC"]],
+//         transaction
+//       });
+
+//       if (!latestRecord) {
+//         return {
+//           currentStreak: currentWeekStreak,
+//           maxStreak: currentWeekStreak
+//         };
+//       }
+
+//       const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
+//       let lastDayPresent = false;
+
+//       for (const day of previousDaysOrder) {
+//         const dayPresent = latestRecord[`${day}_present`];
+//         if (dayPresent !== null) {
+//           lastDayPresent = dayPresent;
+//           break;
+//         }
+//       }
+
+//       let newCurrentStreak;
+//       if (lastDayPresent && currentWeekAttendance.sun.present) {
+//         newCurrentStreak = latestRecord.current_streak + currentWeekStreak;
+//       } else if (currentWeekStreak > 0) {
+//         newCurrentStreak = currentWeekStreak;
+//       } else {
+//         newCurrentStreak = 0;
+//       }
+
+//       const newMaxStreak = Math.max(latestRecord.max_streak, newCurrentStreak);
+
+//       return {
+//         currentStreak: newCurrentStreak,
+//         maxStreak: newMaxStreak
+//       };
+//     };
+
+//     const weekStartDate = req.body.weekStartDate || null;
+//     const weekEndDate = req.body.weekEndDate || null;
+//     const uploadedBy = req.user?.id || null;
+
+//     const processedEmployees = [];
+
+//     for (const row of rawData.filter(r => r.Person)) {
+//       const empCode = row.EmployeeCode || row.emp_code;
+//       const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
+
+//       // Get the latest record to check for existing data and multiplier
+//       const latestRecord = await EmployeeXpResults.findOne({
+//         where: { emp_code: empCode },
+//         order: [["upload_date", "DESC"]],
+//         transaction
+//       });
+
+//       // Get multiplier from latest record or default to 1
+//       const currentMultiplier = latestRecord ? latestRecord.multiplier : 1;
+
+//       // Calculate XP with current multiplier
+//       const xpCalculation = calculateXP(row, currentMultiplier);
+
+//       // Calculate streak
+//       const streakData = await calculateOverallStreak(empCode, xpCalculation.attendanceDetails, transaction);
+
+//       // Calculate season bonus XP based on new streak
+//       const existingMilestones = latestRecord ? latestRecord.season_streak_milestones || [] : [];
+//       const seasonBonus = calculateSeasonBonus(streakData.currentStreak, existingMilestones);
+
+//       // Calculate cumulative XP (sum of all previous weeks + current week)
+//       const allPreviousRecords = await EmployeeXpResults.findAll({
+//         where: { emp_code: empCode },
+//         attributes: ['total_xp'],
+//         transaction
+//       });
+
+//       const previousTotalXP = allPreviousRecords.reduce((sum, record) => sum + record.total_xp, 0);
+//       const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
+//       const cumulativeXP = previousTotalXP + weeklyXP;
+
+//       // Always CREATE a new record (no updates to maintain history)
+//       await EmployeeXpResults.create({
+//         person_id: parseInt(row.Person),
+//         firstname: row.Firstname,
+//         surname: row.Surname,
+//         full_name: fullName,
+//         emp_code: empCode,
+//         email: row.Email,
+//         location: row.locationName,
+//         client: row.ClientName,
+//         total_xp: cumulativeXP, // This now represents cumulative XP across all weeks
+//         season_bonus_xp: seasonBonus.bonusXP,
+//         season_streak_milestones: seasonBonus.milestones,
+
+//         // Set multiplier from latest record or default
+//         multiplier: currentMultiplier,
+
+//         current_streak: streakData.currentStreak,
+//         max_streak: streakData.maxStreak,
+
+//         total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+//         total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
+
+//         // Daily attendance flags for current week
+//         sunday_present: xpCalculation.attendanceDetails.sun.present,
+//         monday_present: xpCalculation.attendanceDetails.mon.present,
+//         tuesday_present: xpCalculation.attendanceDetails.tue.present,
+//         wednesday_present: xpCalculation.attendanceDetails.wed.present,
+//         thursday_present: xpCalculation.attendanceDetails.thu.present,
+//         friday_present: xpCalculation.attendanceDetails.fri.present,
+//         saturday_present: xpCalculation.attendanceDetails.sat.present,
+
+//         // Daily hours for current week
+//         sunday_hours: xpCalculation.attendanceDetails.sun.hours,
+//         monday_hours: xpCalculation.attendanceDetails.mon.hours,
+//         tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
+//         wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
+//         thursday_hours: xpCalculation.attendanceDetails.thu.hours,
+//         friday_hours: xpCalculation.attendanceDetails.fri.hours,
+//         saturday_hours: xpCalculation.attendanceDetails.sat.hours,
+
+//         upload_date: new Date(),
+//         week_start_date: weekStartDate,
+//         week_end_date: weekEndDate,
+//         uploaded_by: uploadedBy
+//       }, { transaction });
+
+//       processedEmployees.push({
+//         emp_code: empCode,
+//         name: fullName,
+//         weekly_xp: xpCalculation.totalXP, // XP earned this week only
+//         season_bonus_earned: seasonBonus.bonusXP,
+//         cumulative_xp: cumulativeXP, // Total XP across all weeks
+//         current_streak: streakData.currentStreak,
+//         max_streak: streakData.maxStreak,
+//         weekly_attendance: {
+//           sunday: xpCalculation.attendanceDetails.sun.present,
+//           monday: xpCalculation.attendanceDetails.mon.present,
+//           tuesday: xpCalculation.attendanceDetails.tue.present,
+//           wednesday: xpCalculation.attendanceDetails.wed.present,
+//           thursday: xpCalculation.attendanceDetails.thu.present,
+//           friday: xpCalculation.attendanceDetails.fri.present,
+//           saturday: xpCalculation.attendanceDetails.sat.present,
+//           days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length
+//         },
+//         milestones_achieved: seasonBonus.milestones.filter(m => !existingMilestones.includes(m))
+//       });
+//     }
+
+//     await transaction.commit();
+
+//     // Calculate statistics including season bonus
+//     const totalSeasonBonus = processedEmployees.reduce((sum, emp) => sum + emp.season_bonus_earned, 0);
+//     const totalWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp, 0);
+//     const employeesWithNewMilestones = processedEmployees.filter(emp => emp.milestones_achieved.length > 0);
+
+//     res.status(200).json({
+//       success: true,
+//       message: "New week data created successfully with history maintained",
+//       totalEmployees: processedEmployees.length,
+//       weekSummary: {
+//         totalWeeklyXPAwarded: totalWeeklyXP,
+//         totalSeasonBonusAwarded: totalSeasonBonus,
+//         employeesWithNewMilestones: employeesWithNewMilestones.length,
+//         weekStartDate: weekStartDate,
+//         weekEndDate: weekEndDate
+//       },
+//       seasonBonusSystem: {
+//         milestoneBreakdown: SEASON_BONUS_CONFIG.milestones
+//       },
+//       xpCalculation: {
+//         formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Season Bonus >= 0",
+//         description: "Each week creates a new record. Cumulative XP is calculated by summing all previous weeks plus current week XP.",
+//         xpPerDay: 2500,
+//         penaltyPerWeek: -1000,
+//         defaultMultiplier: 1
+//       },
+//       processedEmployees: processedEmployees
+//     });
+
+//   } catch (err) {
+//     if (transaction && !transaction.finished) {
+//       await transaction.rollback();
+//     }
+//     console.error("Error:", err);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to process Excel file and save to database",
+//       error: err.message
+//     });
+//   }
+// });
+router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No file uploaded" });
+    }
+
+    const filePath = req.file.path;
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    const hasValue = (value) => {
+      return value !== null && value !== undefined && value !== "";
+    };
+
+    // Season bonus configuration - based on consecutive perfect weeks
+    const SEASON_BONUS_CONFIG = {
+      milestones: [
+        { perfectWeeks: 1, bonus: 250 },   // 1 perfect week = 250 XP
+        { perfectWeeks: 2, bonus: 500 },   // 2 consecutive perfect weeks = 500 XP  
+        { perfectWeeks: 3, bonus: 750 },   // 3 consecutive perfect weeks = 750 XP
+        { perfectWeeks: 4, bonus: 1000 },  // 4 consecutive perfect weeks = 1000 XP
+        { perfectWeeks: 5, bonus: 1000 }   // 5 consecutive perfect weeks = 1000 XP
+      ]
+    };
+
+    // Function to calculate season bonus XP based on consecutive perfect weeks
+    const calculateSeasonBonus = async (empCode, currentWeekPerfect, transaction) => {
+      if (!currentWeekPerfect) {
+        // If current week is not perfect, no bonus and reset streak
+        return {
+          bonusXP: 0,
+          consecutivePerfectWeeks: 0
+        };
+      }
+
+      // Get all previous records to count consecutive perfect weeks
+      const previousRecords = await EmployeeXpResults.findAll({
+        where: { emp_code: empCode },
+        order: [["week_start_date", "DESC"]],
+        attributes: ['total_days_present'],
+        transaction
+      });
+
+      // Count consecutive perfect weeks from most recent backwards
+      let consecutivePerfectWeeks = 1; // Current week is perfect
+
+      for (const record of previousRecords) {
+        if (record.total_days_present === 7) {
+          consecutivePerfectWeeks++;
+        } else {
+          break; // Stop at first non-perfect week
+        }
+      }
+
+      // Find the bonus for current consecutive perfect weeks
+      let bonusXP = 0;
+      for (const milestone of SEASON_BONUS_CONFIG.milestones) {
+        if (consecutivePerfectWeeks >= milestone.perfectWeeks) {
+          bonusXP = milestone.bonus;
+        }
+      }
+
+      return {
+        bonusXP: bonusXP,
+        consecutivePerfectWeeks: consecutivePerfectWeeks
+      };
+    };
+
+    // Updated XP calculation with refined penalty logic
+    const calculateXP = (employeeData, multiplier = 1) => {
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const xpPerDay = 2500;
+      const penaltyXP = -1000;
+      let baseXP = 0;
+      let attendanceDetails = {};
+      let perfectAttendance = true;
+
+      days.forEach((day) => {
+        const inTime = employeeData[`${day}_In`];
+        const outTime = employeeData[`${day}_Out`];
+
+        if (hasValue(inTime) && hasValue(outTime)) {
+          baseXP += xpPerDay;
+          attendanceDetails[day.toLowerCase()] = {
+            present: true,
+            hours: employeeData[`${day}_Hours`] || 0
+          };
+        } else {
+          attendanceDetails[day.toLowerCase()] = {
+            present: false,
+            hours: 0
+          };
+          perfectAttendance = false;
+        }
+      });
+
+      // Apply multiplier to base XP
+      let totalXP = baseXP * multiplier;
+
+      // Apply penalty ONLY if: not perfect attendance and has base XP
+      let penaltyApplied = 0;
+      if (!perfectAttendance && baseXP > 0) {
+        totalXP += penaltyXP;
+        penaltyApplied = penaltyXP;
+      }
+
+      // Ensure XP cannot be negative
+      if (totalXP < 0) {
+        totalXP = 0;
+      }
+
+      return {
+        baseXP,
+        totalXP,
+        attendanceDetails,
+        perfectAttendance,
+        penaltyApplied,
+        multiplierUsed: multiplier
+      };
+    };
+
+    // Function to calculate streak within a week
+    const calculateCurrentWeekStreak = (attendanceDetails) => {
+      const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      let maxStreak = 0;
+      let currentStreak = 0;
+
+      for (const day of daysOrder) {
+        if (attendanceDetails[day] && attendanceDetails[day].present) {
+          currentStreak += 1;
+          maxStreak = Math.max(maxStreak, currentStreak);
+        } else {
+          currentStreak = 0;
+        }
+      }
+
+      return maxStreak;
+    };
+
+    // Function to calculate overall streak (considering previous weeks)
+    const calculateOverallStreak = async (empCode, currentWeekAttendance, transaction) => {
+      const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
+
+      // Get the most recent record for this employee
+      const latestRecord = await EmployeeXpResults.findOne({
+        where: { emp_code: empCode },
+        order: [["upload_date", "DESC"]],
+        transaction
+      });
+
+      if (!latestRecord) {
+        return {
+          currentStreak: currentWeekStreak,
+          maxStreak: currentWeekStreak
+        };
+      }
+
+      const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
+      let lastDayPresent = false;
+
+      for (const day of previousDaysOrder) {
+        const dayPresent = latestRecord[`${day}_present`];
+        if (dayPresent !== null) {
+          lastDayPresent = dayPresent;
+          break;
+        }
+      }
+
+      let newCurrentStreak;
+      if (lastDayPresent && currentWeekAttendance.sun.present) {
+        newCurrentStreak = latestRecord.current_streak + currentWeekStreak;
+      } else if (currentWeekStreak > 0) {
+        newCurrentStreak = currentWeekStreak;
+      } else {
+        newCurrentStreak = 0;
+      }
+
+      const newMaxStreak = Math.max(latestRecord.max_streak, newCurrentStreak);
+
+      return {
+        currentStreak: newCurrentStreak,
+        maxStreak: newMaxStreak
+      };
+    };
+
+    const weekStartDate = req.body.weekStartDate || null;
+    const weekEndDate = req.body.weekEndDate || null;
+    const uploadedBy = req.user?.id || null;
+
+    const processedEmployees = [];
+
+    for (const row of rawData.filter(r => r.Person)) {
+      const empCode = row.EmployeeCode || row.emp_code;
+      const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
+
+      // Get the latest record to check for existing data and multiplier
+      const latestRecord = await EmployeeXpResults.findOne({
+        where: { emp_code: empCode },
+        order: [["upload_date", "DESC"]],
+        transaction
+      });
+
+      // Get multiplier from latest record or default to 1
+      const currentMultiplier = latestRecord ? latestRecord.multiplier : 1;
+
+      // Calculate XP with current multiplier
+      const xpCalculation = calculateXP(row, currentMultiplier);
+
+      // Check if current week is perfect (all 7 days present)
+      const currentWeekPerfect = Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length === 7;
+
+      // Calculate streak
+      const streakData = await calculateOverallStreak(empCode, xpCalculation.attendanceDetails, transaction);
+
+      // Calculate season bonus XP based on consecutive perfect weeks
+      const seasonBonus = await calculateSeasonBonus(empCode, currentWeekPerfect, transaction);
+
+      // Calculate cumulative XP (sum of all previous weeks + current week)
+      const allPreviousRecords = await EmployeeXpResults.findAll({
+        where: { emp_code: empCode },
+        attributes: ['total_xp'],
+        transaction
+      });
+
+      const previousTotalXP = allPreviousRecords.reduce((sum, record) => sum + record.total_xp, 0);
+      const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
+      const cumulativeXP = previousTotalXP + weeklyXP;
+
+      // Always CREATE a new record (no updates to maintain history)
+      await EmployeeXpResults.create({
+        person_id: parseInt(row.Person),
+        firstname: row.Firstname,
+        surname: row.Surname,
+        full_name: fullName,
+        emp_code: empCode,
+        email: row.Email,
+        location: row.locationName,
+        client: row.ClientName,
+        total_xp: cumulativeXP, // This now represents cumulative XP across all weeks
+        season_bonus_xp: seasonBonus.bonusXP,
+        season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
+
+        // Set multiplier from latest record or default
+        multiplier: currentMultiplier,
+
+        current_streak: streakData.currentStreak,
+        max_streak: streakData.maxStreak,
+
+        total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+        total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
+
+        // Daily attendance flags for current week
+        sunday_present: xpCalculation.attendanceDetails.sun.present,
+        monday_present: xpCalculation.attendanceDetails.mon.present,
+        tuesday_present: xpCalculation.attendanceDetails.tue.present,
+        wednesday_present: xpCalculation.attendanceDetails.wed.present,
+        thursday_present: xpCalculation.attendanceDetails.thu.present,
+        friday_present: xpCalculation.attendanceDetails.fri.present,
+        saturday_present: xpCalculation.attendanceDetails.sat.present,
+
+        // Daily hours for current week
+        sunday_hours: xpCalculation.attendanceDetails.sun.hours,
+        monday_hours: xpCalculation.attendanceDetails.mon.hours,
+        tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
+        wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
+        thursday_hours: xpCalculation.attendanceDetails.thu.hours,
+        friday_hours: xpCalculation.attendanceDetails.fri.hours,
+        saturday_hours: xpCalculation.attendanceDetails.sat.hours,
+
+        upload_date: new Date(),
+        week_start_date: weekStartDate,
+        week_end_date: weekEndDate,
+        uploaded_by: uploadedBy
+      }, { transaction });
+
+      processedEmployees.push({
+        emp_code: empCode,
+        name: fullName,
+        weekly_xp: xpCalculation.totalXP, // XP earned this week only
+        season_bonus_earned: seasonBonus.bonusXP,
+        consecutive_perfect_weeks: seasonBonus.consecutivePerfectWeeks,
+        current_week_perfect: currentWeekPerfect,
+        cumulative_xp: cumulativeXP, // Total XP across all weeks
+        current_streak: streakData.currentStreak,
+        max_streak: streakData.maxStreak,
+        weekly_attendance: {
+          sunday: xpCalculation.attendanceDetails.sun.present,
+          monday: xpCalculation.attendanceDetails.mon.present,
+          tuesday: xpCalculation.attendanceDetails.tue.present,
+          wednesday: xpCalculation.attendanceDetails.wed.present,
+          thursday: xpCalculation.attendanceDetails.thu.present,
+          friday: xpCalculation.attendanceDetails.fri.present,
+          saturday: xpCalculation.attendanceDetails.sat.present,
+          days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length
+        }
+      });
+    }
+
+    await transaction.commit();
+
+    // Calculate statistics including season bonus
+    const totalSeasonBonus = processedEmployees.reduce((sum, emp) => sum + emp.season_bonus_earned, 0);
+    const totalWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp, 0);
+    const employeesWithPerfectWeek = processedEmployees.filter(emp => emp.current_week_perfect).length;
+    const employeesWithSeasonBonus = processedEmployees.filter(emp => emp.season_bonus_earned > 0).length;
+
+    res.status(200).json({
+      success: true,
+      message: "New week data created successfully with consecutive perfect week bonuses",
+      totalEmployees: processedEmployees.length,
+      weekSummary: {
+        totalWeeklyXPAwarded: totalWeeklyXP,
+        totalSeasonBonusAwarded: totalSeasonBonus,
+        employeesWithPerfectWeek: employeesWithPerfectWeek,
+        employeesWithSeasonBonus: employeesWithSeasonBonus,
+        weekStartDate: weekStartDate,
+        weekEndDate: weekEndDate
+      },
+      seasonBonusSystem: {
+        description: "Bonus XP awarded for consecutive perfect weeks (7 days each). Resets when any day is missed.",
+        milestoneBreakdown: SEASON_BONUS_CONFIG.milestones,
+        rules: [
+          "1 perfect week (7 days) = 250 XP",
+          "2 consecutive perfect weeks (14 days) = 500 XP",
+          "3 consecutive perfect weeks (21 days) = 750 XP",
+          "4 consecutive perfect weeks (28 days) = 1000 XP",
+          "5+ consecutive perfect weeks (35+ days) = 1000 XP",
+          "Missing any day resets the consecutive count"
+        ]
+      },
+      xpCalculation: {
+        formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Perfect Week Bonus >= 0",
+        description: "Each week creates a new record. Perfect week bonus increases with consecutive perfect weeks.",
+        xpPerDay: 2500,
+        penaltyPerWeek: -1000,
+        defaultMultiplier: 1,
+        perfectWeekBonus: "250-1000 XP based on consecutive perfect weeks"
+      },
+      processedEmployees: processedEmployees
+    });
+
+  } catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to process Excel file and save to database",
+      error: err.message
+    });
+  }
+});
+
+// Get ExcelAttendence Data
+router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const offset = (page - 1) * pageSize;
+
+    // Optional filters
+    const whereClause = {};
+    if (req.query.location) whereClause.location = { [Op.like]: `%${req.query.location}%` };
+    if (req.query.client) whereClause.client = { [Op.like]: `%${req.query.client}%` };
+    if (req.query.week_start_date) whereClause.week_start_date = req.query.week_start_date;
+
+    const { count, rows } = await EmployeeXpResults.findAndCountAll({
+      where: whereClause,
+      limit: pageSize,
+      offset: offset,
+      order: [['total_xp', 'DESC']],
+    });
+
+    const totalPages = Math.ceil(count / pageSize);
+
+    const allRecords = await EmployeeXpResults.findAll({
+      where: whereClause,
+    });
+
+    const statistics = {
+      highestXP: allRecords.length > 0 ? Math.max(...allRecords.map(r => r.total_xp)) : 0,
+      lowestXP: allRecords.length > 0 ? Math.min(...allRecords.map(r => r.total_xp)) : 0,
+      averageXP: allRecords.length > 0 ? Math.round(
+        allRecords.reduce((sum, r) => sum + r.total_xp, 0) / allRecords.length
+      ) : 0,
+      totalEmployees: count
+    };
+
+    res.status(200).json({
+      success: true,
+      data: rows,
+      pagination: {
+        currentPage: page,
+        pageSize: pageSize,
+        totalPages: totalPages,
+        totalRecords: count,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1
+      },
+      xpCalculation: {
+        formula: "XP = 2500 × Number of Days Present (Cumulative across weeks)",
+        description: "Employee gets 2500 XP for each day they have both check-in and check-out entries. XP accumulates weekly.",
+        xpPerDay: 2500,
+        maxWeeklyXP: 17500,
+      },
+      statistics: statistics
+    });
+
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve employee records",
+      error: err.message
+    });
+  }
+});
+
+// Spin the Wheel Save configuration
+router.post("/wheel/save-configuration", async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { sections, xpValues, totalXP } = req.body;
+
+    // Validation
+    if (!sections || sections < 2 || sections > 20) {
+      return res.status(400).send(
+        HelperUtils.errorObj("Number of sections must be between 2 and 20")
+      );
+    }
+
+    if (!xpValues || !Array.isArray(xpValues) || xpValues.length !== sections) {
+      return res.status(400).send(
+        HelperUtils.errorObj("xpValues array length must match sections count")
+      );
+    }
+
+    // Validate each XP value
+    for (let i = 0; i < xpValues.length; i++) {
+      if (typeof xpValues[i] !== 'number' || xpValues[i] < 0) {
+        return res.status(400).send(
+          HelperUtils.errorObj(`XP value at index ${i} must be a valid positive number`)
+        );
+      }
+    }
+
+    // Calculate and verify total XP
+    const calculatedTotal = xpValues.reduce((sum, xp) => sum + xp, 0);
+
+    if (totalXP && totalXP !== calculatedTotal) {
+      return res.status(400).send(
+        HelperUtils.errorObj(`Total XP mismatch. Expected: ${calculatedTotal}, Received: ${totalXP}`)
+      );
+    }
+
+    // Convert to internal format for storage
+    const sectionsData = xpValues.map((xpValue, index) => ({
+      sectionNumber: index + 1,
+      xpValue: xpValue
+    }));
+
+    // Check if global wheel configuration already exists
+    const existingConfig = await SpinTheWheel.findOne({
+      where: { is_active: true },
+      transaction
+    });
+
+    const configData = {
+      number_of_sections: sections,
+      sections: JSON.stringify(sectionsData),
+      total_xp_pool: calculatedTotal,
+      is_active: true,
+      is_global: true,
+      created_by: "admin",
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+
+    let wheelConfig;
+    if (existingConfig) {
+      // Update existing global configuration
+      wheelConfig = await existingConfig.update(configData, { transaction });
+    } else {
+      // Create new global configuration
+      configData.created_at = new Date();
+      wheelConfig = await SpinTheWheel.create(configData, { transaction });
+    }
+
+    await transaction.commit();
+
+    // Return response in frontend-friendly format
+    res.status(200).json({
+      id: wheelConfig.id,
+      sections: wheelConfig.number_of_sections,
+      xpValues: xpValues,
+      totalXP: wheelConfig.total_xp_pool,
+      isActive: wheelConfig.is_active,
+      isGlobal: wheelConfig.is_global,
+      updatedAt: wheelConfig.updated_at
+    });
+
+  } catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error saving wheel configuration:", err);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to save wheel configuration")
+    );
+  }
+});
+
+router.get("/wheel/configuration", async (req, res) => {
+  try {
+    // Get the global wheel configuration set by admin
+    const wheelConfig = await SpinTheWheel.findOne({
+      where: {
+        is_active: true
+      },
+      attributes: [
+        'id',
+        'number_of_sections',
+        'sections',
+        'total_xp_pool',
+        'is_active'
+      ]
+    });
+
+    if (!wheelConfig) {
+      return res.status(404).send(
+        HelperUtils.errorObj("No wheel configuration available. Please contact admin.")
+      );
+    }
+
+    // Format the response (limited info for users)
+    const formattedConfig = {
+      id: wheelConfig.id,
+      numberOfSections: wheelConfig.number_of_sections,
+      sections: JSON.parse(wheelConfig.sections),
+      totalXpPool: wheelConfig.total_xp_pool,
+      isActive: wheelConfig.is_active
+    };
+
+    res.status(200).send(
+      HelperUtils.successObj("Wheel configuration retrieved successfully", formattedConfig)
+    );
+
+  } catch (err) {
+    console.error("Error fetching wheel configuration:", err);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch wheel configuration")
+    );
+  }
+});
 
 module.exports = router;

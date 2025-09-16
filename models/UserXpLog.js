@@ -19,6 +19,14 @@ class UserXpLog extends Model {
         type: DataTypes.INTEGER,
         allowNull: false
       },
+      score: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+      },
+      highscore: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+      },
       date: {
         type: DataTypes.DATEONLY,
         allowNull: false
