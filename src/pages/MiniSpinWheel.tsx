@@ -11,7 +11,10 @@ import {
   Toast,
   ToastContainer,
 } from "react-bootstrap";
-import { saveWheelConfigurationRequest, getWheelConfigurationRequest } from "../store/Api/requests";
+import {
+  saveWheelConfigurationRequest,
+  getWheelConfigurationRequest,
+} from "../store/Api/requests";
 
 const MiniSpinWheel = () => {
   const [wheelSections, setWheelSections] = useState(8);
@@ -22,7 +25,9 @@ const MiniSpinWheel = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
-  const [toastVariant, setToastVariant] = useState<"success" | "danger">("success");
+  const [toastVariant, setToastVariant] = useState<"success" | "danger">(
+    "success"
+  );
 
   // Load existing configuration on component mount
   useEffect(() => {
@@ -32,24 +37,35 @@ const MiniSpinWheel = () => {
   const loadWheelConfiguration = async () => {
     setIsLoading(true);
     try {
-      const response = await getWheelConfigurationRequest();
-      if (response.success && response.data) {
-        const { numberOfSections, sections } = response.data;
+      const response = await getWheelConfigurationRequest(1);
+      console.log("Mini Wheel API Response:", response); // Debug log
+
+      // Handle the actual API response structure
+      if (response.flag && response.result) {
+        const { numberOfSections, sections } = response.result;
+
+        console.log("Setting mini wheel sections:", numberOfSections); // Debug log
+        console.log("Setting mini sections data:", sections); // Debug log
+
         setWheelSections(numberOfSections);
 
         // Extract XP values from sections array
         const xpValues = sections.map((section: any) => section.xpValue);
+        console.log("Setting mini XP values:", xpValues); // Debug log
         setSectionXpValues(xpValues);
       }
     } catch (error: any) {
-      console.log('No existing configuration found or failed to load:', error);
+      console.log("No existing configuration found or failed to load:", error);
       // Keep default values if no configuration exists
     } finally {
       setIsLoading(false);
     }
   };
 
-  const showNotification = (message: string, variant: "success" | "danger" = "success") => {
+  const showNotification = (
+    message: string,
+    variant: "success" | "danger" = "success"
+  ) => {
     setToastMessage(message);
     setToastVariant(variant);
     setShowToast(true);
@@ -58,33 +74,37 @@ const MiniSpinWheel = () => {
   const handleSave = async () => {
     // Validation
     if (wheelSections < 2 || wheelSections > 20) {
-      showNotification('Number of sections must be between 2 and 20', 'danger');
+      showNotification("Number of sections must be between 2 and 20", "danger");
       return;
     }
 
-    if (sectionXpValues.some(xp => xp < 0 || !Number.isInteger(xp))) {
-      showNotification('All XP values must be positive integers', 'danger');
+    if (sectionXpValues.some((xp) => xp < 0 || !Number.isInteger(xp))) {
+      showNotification("All XP values must be positive integers", "danger");
       return;
     }
 
     setIsSaving(true);
     try {
       const configData = {
+        id: 1,
         sections: wheelSections,
         xpValues: sectionXpValues,
-        totalXP: totalXP
+        totalXP: totalXP,
       };
 
-      console.log('Saving wheel configuration:', configData);
+      console.log("Saving wheel configuration:", configData);
       const response = await saveWheelConfigurationRequest(configData);
+      console.log("Mini Save Response:", response); // Debug log
 
       if (response) {
-        showNotification('Wheel configuration saved successfully!');
+        showNotification("Wheel configuration saved successfully!");
       }
     } catch (error: any) {
-      console.error('Failed to save wheel configuration:', error);
-      const errorMessage = error?.message || 'Failed to save wheel configuration. Please try again.';
-      showNotification(errorMessage, 'danger');
+      console.error("Failed to save wheel configuration:", error);
+      const errorMessage =
+        error?.message ||
+        "Failed to save wheel configuration. Please try again.";
+      showNotification(errorMessage, "danger");
     } finally {
       setIsSaving(false);
     }
@@ -129,7 +149,7 @@ const MiniSpinWheel = () => {
                 Configure wheel sections and XP values for your rewards system!
               </p>
             </div>
-            <Button
+            {/* <Button
               variant="outline-primary"
               onClick={loadWheelConfiguration}
               disabled={isLoading}
@@ -140,7 +160,7 @@ const MiniSpinWheel = () => {
                 <i className="bi bi-arrow-clockwise me-2"></i>
               )}
               Refresh
-            </Button>
+            </Button> */}
           </div>
         </Col>
       </Row>
@@ -157,30 +177,38 @@ const MiniSpinWheel = () => {
                 <Form.Control
                   type="number"
                   min="2"
-                  max="20"
+                  max="10"
                   value={wheelSections}
                   onChange={(e) =>
                     handleWheelSectionsChange(parseInt(e.target.value) || 8)
                   }
                 />
                 <Form.Text className="text-muted">
-                  Minimum 2, Maximum 20 sections
+                  Minimum 2, Maximum 10 sections
                 </Form.Text>
               </Form.Group>
 
               <div className="mb-3">
                 <Form.Label>XP Values for Each Section</Form.Label>
-                <div className="row g-2" style={{ maxHeight: "200px", overflowY: "auto" }}>
+                <div
+                  className="row g-2"
+                  style={{ maxHeight: "200px", overflowY: "auto" }}
+                >
                   {sectionXpValues.map((xpValue, index) => (
                     <div key={index} className="col-6">
                       <Form.Group>
-                        <Form.Label className="small">Section {index + 1}</Form.Label>
+                        <Form.Label className="small">
+                          Section {index + 1}
+                        </Form.Label>
                         <Form.Control
                           type="number"
                           min="1"
                           value={xpValue}
                           onChange={(e) =>
-                            handleXpValueChange(index, parseInt(e.target.value) || 100)
+                            handleXpValueChange(
+                              index,
+                              parseInt(e.target.value) || 100
+                            )
                           }
                           size="sm"
                         />
@@ -196,7 +224,8 @@ const MiniSpinWheel = () => {
               <Alert variant="info" className="mb-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div>
-                    <strong>Total XP Pool:</strong> {totalXP.toLocaleString()} XP
+                    <strong>Total XP Pool:</strong> {totalXP.toLocaleString()}{" "}
+                    XP
                   </div>
                   <small className="text-muted">
                     {sectionXpValues.length} sections configured
@@ -241,137 +270,212 @@ const MiniSpinWheel = () => {
             </Card.Header>
             <Card.Body>
               <div className="text-center">
-                {/* Pointer/Arrow at the top */}
+                {/* Professional Wheel Container matching the reference design */}
                 <div
                   style={{
                     position: "relative",
                     display: "inline-block",
-                    marginBottom: "10px",
+                    marginBottom: "20px",
                   }}
                 >
+                  {/* Main Wheel Container */}
                   <div
-                    style={{
-                      width: "0",
-                      height: "0",
-                      borderLeft: "15px solid transparent",
-                      borderRight: "15px solid transparent",
-                      borderTop: "30px solid #dc3545",
-                      position: "absolute",
-                      top: "290px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      zIndex: 10,
-                      filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))",
-                    }}
-                  />
-
-                  <div
-                    className="wheel-container d-inline-block position-relative"
+                    className="wheel-container position-relative"
                     style={{
                       width: "320px",
                       height: "320px",
-                      border: "8px solid #2c3e50",
                       borderRadius: "50%",
-                      backgroundColor: "#34495e",
-                      boxShadow: "0 8px 20px rgba(0,0,0,0.3), inset 0 0 20px rgba(0,0,0,0.2)",
+                      background: "#f8f9fa",
+                      boxShadow:
+                        "0 8px 25px rgba(0,0,0,0.15), inset 0 0 10px rgba(0,0,0,0.1)",
                       position: "relative",
-                      overflow: "hidden",
+                      display: "inline-block",
                     }}
                   >
-                    {/* Wheel sections */}
-                    {Array.from({ length: wheelSections }, (_, index) => {
-                      const sectionAngle = 360 / wheelSections;
-                      const rotation = sectionAngle * index;
+                    {/* Wheel Sections */}
+                    <svg
+                      width="320"
+                      height="320"
+                      style={{ position: "absolute", top: 0, left: 0 }}
+                    >
+                      {Array.from({ length: wheelSections }, (_, index) => {
+                        const sectionAngle = 360 / wheelSections;
+                        const startAngle =
+                          (index * sectionAngle - 90) * (Math.PI / 180); // Start from top
+                        const endAngle =
+                          ((index + 1) * sectionAngle - 90) * (Math.PI / 180);
+                        const midAngle = (startAngle + endAngle) / 2;
 
-                      return (
-                        <div
-                          key={index}
-                          className="wheel-section position-absolute"
-                          style={{
-                            width: "50%",
-                            height: "50%",
-                            transformOrigin: "100% 100%",
-                            transform: `rotate(${rotation}deg)`,
-                            clipPath: `polygon(0 100%, 100% 100%, 100% ${100 - (100 / wheelSections)}%)`,
-                            background: `linear-gradient(45deg, 
-                              hsl(${(index * 360) / wheelSections}, 70%, 55%), 
-                              hsl(${(index * 360) / wheelSections}, 70%, 45%))`,
-                            border: "1px solid rgba(255,255,255,0.2)",
-                            borderBottom: "none",
-                            borderRight: "none",
-                          }}
-                        >
-                          {/* Section content */}
+                        const radius = 160;
+                        const centerX = 160;
+                        const centerY = 160;
+
+                        // Calculate path for pie slice
+                        const x1 = centerX + radius * Math.cos(startAngle);
+                        const y1 = centerY + radius * Math.sin(startAngle);
+                        const x2 = centerX + radius * Math.cos(endAngle);
+                        const y2 = centerY + radius * Math.sin(endAngle);
+
+                        const largeArcFlag = sectionAngle > 180 ? 1 : 0;
+                        const pathData = `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+
+                        // Alternating colors like the reference
+                        const isEven = index % 2 === 0;
+                        const sectionColor = isEven ? "#ff9999" : "#b19cd9"; // Pink and Purple alternating
+
+                        return (
+                          <g key={index}>
+                            {/* Section Path */}
+                            <path
+                              d={pathData}
+                              fill={sectionColor}
+                              stroke="white"
+                              strokeWidth="2"
+                              style={{
+                                transition: "all 0.3s ease",
+                                filter: "brightness(1)",
+                              }}
+                              className="wheel-section-path"
+                            />
+
+                            {/* Section Text */}
+                            <text
+                              x={centerX + radius * 0.7 * Math.cos(midAngle)}
+                              y={centerY + radius * 0.7 * Math.sin(midAngle)}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                              fill="white"
+                              fontSize={wheelSections > 10 ? "10" : "12"}
+                              fontWeight="bold"
+                              style={{
+                                textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
+                                pointerEvents: "none",
+                              }}
+                              transform={`rotate(${(midAngle * 180) / Math.PI
+                                }, ${centerX + radius * 0.7 * Math.cos(midAngle)
+                                }, ${centerY + radius * 0.7 * Math.sin(midAngle)
+                                })`}
+                            >
+                              <tspan
+                                x={centerX + radius * 0.7 * Math.cos(midAngle)}
+                                dy="-6"
+                              >
+                                Section {index + 1}
+                              </tspan>
+                              <tspan
+                                x={centerX + radius * 0.7 * Math.cos(midAngle)}
+                                dy="12"
+                                fontSize={wheelSections > 10 ? "8" : "10"}
+                              >
+                                {sectionXpValues[index]} XP
+                              </tspan>
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+
+                    {/* Decorative Dots around the rim */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "0",
+                        left: "0",
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {Array.from({ length: 24 }, (_, index) => {
+                        const dotAngle = index * 15 * (Math.PI / 180); // 24 dots around the circle
+                        const dotRadius = 155;
+                        const dotX = 160 + dotRadius * Math.cos(dotAngle);
+                        const dotY = 160 + dotRadius * Math.sin(dotAngle);
+
+                        return (
                           <div
+                            key={index}
                             style={{
                               position: "absolute",
-                              top: "15%",
-                              left: "25%",
-                              transform: `rotate(${-rotation + sectionAngle / 2}deg)`,
-                              color: "white",
-                              fontWeight: "bold",
-                              fontSize: wheelSections > 12 ? "8px" : "10px",
-                              textShadow: "2px 2px 4px rgba(0,0,0,0.8)",
-                              textAlign: "center",
-                              lineHeight: "1.1",
-                              width: "40px",
+                              left: dotX - 3,
+                              top: dotY - 3,
+                              width: "6px",
+                              height: "6px",
+                              borderRadius: "50%",
+                              backgroundColor: "#666",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
                             }}
-                          >
-                            <div>#{index + 1}</div>
-                            <div style={{ fontSize: wheelSections > 12 ? "6px" : "8px" }}>
-                              {sectionXpValues[index]} XP
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          />
+                        );
+                      })}
+                    </div>
 
-                    {/* Center hub */}
+                    {/* Center Hub */}
                     <div
-                      className="position-absolute top-50 start-50 translate-middle"
                       style={{
-                        width: "80px",
-                        height: "80px",
-                        background: "linear-gradient(135deg, #3498db, #2980b9)",
+                        position: "absolute",
+                        top: "50%",
+                        left: "50%",
+                        transform: "translate(-50%, -50%)",
+                        width: "60px",
+                        height: "60px",
                         borderRadius: "50%",
-                        border: "4px solid #ecf0f1",
+                        background: "linear-gradient(135deg, #4285f4, #1a73e8)",
+                        border: "3px solid white",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         color: "white",
                         fontWeight: "bold",
-                        fontSize: "10px",
-                        boxShadow: "0 4px 10px rgba(0,0,0,0.3), inset 0 2px 5px rgba(255,255,255,0.3)",
-                        zIndex: 5,
+                        fontSize: "12px",
+                        boxShadow:
+                          "0 4px 15px rgba(0,0,0,0.2), inset 0 2px 5px rgba(255,255,255,0.3)",
+                        zIndex: 10,
                       }}
                     >
-                      WHEEL
                     </div>
 
-                    {/* Outer rim decoration */}
+                    {/* Pointer/Arrow */}
                     <div
-                      className="position-absolute"
                       style={{
-                        top: "-4px",
-                        left: "-4px",
-                        right: "-4px",
-                        bottom: "-4px",
-                        borderRadius: "50%",
-                        border: "2px solid #bdc3c7",
-                        pointerEvents: "none",
+                        position: "absolute",
+                        top: "-10px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        width: "0",
+                        height: "0",
+                        borderLeft: "15px solid transparent",
+                        borderRight: "15px solid transparent",
+                        borderBottom: "25px solid #34a853",
+                        zIndex: 15,
+                        filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))",
                       }}
                     />
                   </div>
                 </div>
 
-                {/* Add CSS for hover effects */}
+                {/* Add CSS for hover effects and animations */}
                 <style>{`
-                  .wheel-section {
+                  .wheel-section-path {
                     transition: all 0.3s ease;
                   }
                   
-                  .wheel-section:hover {
+                  .wheel-section-path:hover {
                     filter: brightness(1.1);
+                    transform: scale(1.02);
+                  }
+                  
+                  .wheel-container {
+                    animation: wheelShadow 3s ease-in-out infinite alternate;
+                  }
+                  
+                  @keyframes wheelShadow {
+                    0% {
+                      box-shadow: 0 8px 25px rgba(0,0,0,0.15), inset 0 0 10px rgba(0,0,0,0.1);
+                    }
+                    100% {
+                      box-shadow: 0 12px 35px rgba(0,0,0,0.2), inset 0 0 15px rgba(0,0,0,0.15);
+                    }
                   }
                 `}</style>
 
@@ -379,8 +483,10 @@ const MiniSpinWheel = () => {
                   <h6>Section Details:</h6>
                   <div className="row">
                     {Array.from({ length: wheelSections }, (_, index) => {
-                      const isHighestXP = sectionXpValues[index] === Math.max(...sectionXpValues);
-                      const isLowestXP = sectionXpValues[index] === Math.min(...sectionXpValues);
+                      const isHighestXP =
+                        sectionXpValues[index] === Math.max(...sectionXpValues);
+                      const isLowestXP =
+                        sectionXpValues[index] === Math.min(...sectionXpValues);
 
                       return (
                         <div key={index} className="col-3 col-md-2 mb-2">
@@ -391,7 +497,10 @@ const MiniSpinWheel = () => {
                                 ? "bg-light text-dark"
                                 : "bg-secondary"
                               }`}
-                            style={{ fontSize: "0.75rem", position: "relative" }}
+                            style={{
+                              fontSize: "0.75rem",
+                              position: "relative",
+                            }}
                           >
                             {isHighestXP && (
                               <span
@@ -399,7 +508,7 @@ const MiniSpinWheel = () => {
                                   position: "absolute",
                                   top: "-5px",
                                   right: "-5px",
-                                  fontSize: "8px"
+                                  fontSize: "8px",
                                 }}
                               >
                                 👑
@@ -434,7 +543,9 @@ const MiniSpinWheel = () => {
               {toastVariant === "success" ? "Success" : "Error"}
             </strong>
           </Toast.Header>
-          <Toast.Body className={toastVariant === "success" ? "text-white" : "text-white"}>
+          <Toast.Body
+            className={toastVariant === "success" ? "text-white" : "text-white"}
+          >
             {toastMessage}
           </Toast.Body>
         </Toast>
@@ -444,4 +555,3 @@ const MiniSpinWheel = () => {
 };
 
 export default MiniSpinWheel;
-

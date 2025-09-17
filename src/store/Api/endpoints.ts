@@ -20,3 +20,6 @@ export const assignRewards = "admin/rewards/assign";
 export const progressReport = "admin/progress-report";
 export const wheelSaveConfiguration = "admin/wheel/save-configuration";
 export const wheelGetConfiguration = "admin/wheel/configuration";
+export const bigWheelActivate = "admin/big-wheel/activate";
+export const bigWheelDeactivate = "admin/big-wheel/deactivate";
+export const bigWheelStatus = "admin/big-wheel/status";

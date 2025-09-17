@@ -13,6 +13,7 @@ const XpSystem = lazy(() => import("../pages/XpSystem"));
 const LeaderBoard = lazy(() => import("../pages/LeaderBoard"));
 const Reward = lazy(() => import("../pages/Reward"));
 const MiniSpinWheel = lazy(() => import("../pages/MiniSpinWheel"));
+const BigSpinWheel = lazy(() => import("../pages/BigSpinWheel"));
 
 // Loading fallback
 const LoadingFallback = () => (
@@ -54,6 +55,7 @@ const AppRoutes = () => {
           <Route path="leaderboard" element={<LeaderBoard />} />
           <Route path="reward" element={<Reward />} />
           <Route path="mini-spin-wheel" element={<MiniSpinWheel />} />
+          <Route path="big-spin-wheel" element={<BigSpinWheel />} />
         </Route>
 
         {/* Fallback route */}

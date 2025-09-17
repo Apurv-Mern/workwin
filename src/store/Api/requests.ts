@@ -23,6 +23,9 @@ import {
   progressReport,
   wheelSaveConfiguration,
   wheelGetConfiguration,
+  bigWheelActivate,
+  bigWheelDeactivate,
+  bigWheelStatus,
 } from "./endpoints";
 
 // Define the API requests
@@ -274,9 +277,36 @@ export const saveWheelConfigurationRequest = async (
   }
 };
 
-export const getWheelConfigurationRequest = async () => {
+export const getWheelConfigurationRequest = async (id: any) => {
   try {
-    const response = await api.get(wheelGetConfiguration);
+    const response = await api.get(`${wheelGetConfiguration}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const activateBigWheelRequest = async () => {
+  try {
+    const response = await api.post(bigWheelActivate);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const deactivateBigWheelRequest = async () => {
+  try {
+    const response = await api.post(bigWheelDeactivate);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+export const getBigWheelStatusRequest = async () => {
+  try {
+    const response = await api.get(bigWheelStatus);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
