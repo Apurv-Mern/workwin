@@ -31,6 +31,10 @@ class SpinTheWheel extends Model {
                 type: DataTypes.BOOLEAN,
                 defaultValue: false
             },
+            is_big: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: false
+            },
             created_at: {
                 type: DataTypes.DATE,
                 defaultValue: DataTypes.NOW

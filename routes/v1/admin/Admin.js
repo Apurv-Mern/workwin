@@ -2162,7 +2162,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const { sections, xpValues, totalXP } = req.body;
+    const { id, sections, xpValues, totalXP } = req.body;
 
     // Validation
     if (!sections || sections < 2 || sections > 20) {
@@ -2203,7 +2203,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
 
     // Check if global wheel configuration already exists
     const existingConfig = await SpinTheWheel.findOne({
-      where: { is_active: true },
+      where: { is_active: true, id },
       transaction
     });
 
@@ -2252,19 +2252,22 @@ router.post("/wheel/save-configuration", async (req, res) => {
   }
 });
 
-router.get("/wheel/configuration", async (req, res) => {
+router.get("/wheel/configuration/:id", async (req, res) => {
   try {
+    const configId = req.params.id;
     // Get the global wheel configuration set by admin
     const wheelConfig = await SpinTheWheel.findOne({
       where: {
-        is_active: true
+        is_active: true,
+        id: configId
       },
       attributes: [
         'id',
         'number_of_sections',
         'sections',
         'total_xp_pool',
-        'is_active'
+        'is_active',
+        "is_big"
       ]
     });
 
