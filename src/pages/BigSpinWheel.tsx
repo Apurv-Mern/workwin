@@ -23,7 +23,7 @@ import {
 const BigSpinWheel = () => {
     const [wheelSections, setWheelSections] = useState(8);
     const [sectionXpValues, setSectionXpValues] = useState<number[]>(
-        Array.from({ length: 8 }, (_, index) => (index + 1) * 200) // Higher default values for big wheel
+        Array.from({ length: 8 }, (_, index) => (index + 1) * 200)
     );
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -43,7 +43,7 @@ const BigSpinWheel = () => {
     const loadBigWheelStatus = async () => {
         try {
             const response = await getBigWheelStatusRequest();
-            console.log("Big Wheel Status Response:", response); // Debug log
+            console.log("Big Wheel Status Response:", response);
             if (response.flag && response.result) {
                 setIsActive(response.result.isActive || false);
             }
@@ -55,31 +55,23 @@ const BigSpinWheel = () => {
     const loadWheelConfiguration = async () => {
         setIsLoading(true);
         try {
-            const response = await getWheelConfigurationRequest(2); // Use ID 2 for big wheel
-            console.log("API Response:", response); // Debug log
+            const response = await getWheelConfigurationRequest(2);
+            console.log("API Response:", response)
 
-            // Handle the actual API response structure
             if (response.flag && response.result) {
                 const {
                     numberOfSections,
                     sections,
-                    isActive: wheelIsActive,
+                    isBig: wheelIsActive,
                 } = response.result;
-
-                console.log("Setting wheel sections:", numberOfSections); // Debug log
-                console.log("Setting sections data:", sections); // Debug log
-
                 setWheelSections(numberOfSections);
                 setIsActive(wheelIsActive || false);
 
-                // Extract XP values from sections array - use original values for big wheel
                 const xpValues = sections.map((section: any) => section.xpValue);
-                console.log("Setting XP values:", xpValues); // Debug log
                 setSectionXpValues(xpValues);
             }
         } catch (error: any) {
             console.log("No existing configuration found or failed to load:", error);
-            // Keep default values if no configuration exists
         } finally {
             setIsLoading(false);
         }
@@ -140,7 +132,7 @@ const BigSpinWheel = () => {
             await handleSave();
 
             // Then activate the wheel using API
-            const response = await activateBigWheelRequest();
+            const response = await activateBigWheelRequest({ id: 2 });
             console.log("Activate Response:", response); // Debug log
             if (response.flag || response.success) {
                 setIsActive(true);
@@ -163,7 +155,9 @@ const BigSpinWheel = () => {
         setIsActivating(true);
         try {
             // Deactivate the wheel using API
-            const response = await deactivateBigWheelRequest();
+            const response = await deactivateBigWheelRequest({
+                id: 2,
+            });
             console.log("Deactivate Response:", response); // Debug log
             if (response.flag || response.success) {
                 setIsActive(false);

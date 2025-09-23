@@ -266,6 +266,10 @@ export interface WheelConfigurationData {
   totalXP: number;
 }
 
+export interface BigWheelActivate {
+  id: number;
+}
+
 export const saveWheelConfigurationRequest = async (
   data: WheelConfigurationData
 ) => {
@@ -286,18 +290,18 @@ export const getWheelConfigurationRequest = async (id: any) => {
   }
 };
 
-export const activateBigWheelRequest = async () => {
+export const activateBigWheelRequest = async (data: BigWheelActivate) => {
   try {
-    const response = await api.post(bigWheelActivate);
+    const response = await api.post(bigWheelActivate, data);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
   }
 };
 
-export const deactivateBigWheelRequest = async () => {
+export const deactivateBigWheelRequest = async (data: BigWheelActivate) => {
   try {
-    const response = await api.post(bigWheelDeactivate);
+    const response = await api.post(bigWheelDeactivate, data);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
