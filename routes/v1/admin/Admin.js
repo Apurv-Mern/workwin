@@ -2252,6 +2252,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
   }
 });
 
+// Get Wheel Configuration for users
 router.get("/wheel/configuration/:id", async (req, res) => {
   try {
     const configId = req.params.id;
@@ -2283,7 +2284,8 @@ router.get("/wheel/configuration/:id", async (req, res) => {
       numberOfSections: wheelConfig.number_of_sections,
       sections: JSON.parse(wheelConfig.sections),
       totalXpPool: wheelConfig.total_xp_pool,
-      isActive: wheelConfig.is_active
+      isActive: wheelConfig.is_active,
+      isBig: wheelConfig.is_big
     };
 
     res.status(200).send(
@@ -2294,6 +2296,78 @@ router.get("/wheel/configuration/:id", async (req, res) => {
     console.error("Error fetching wheel configuration:", err);
     res.status(500).send(
       HelperUtils.errorObj("Failed to fetch wheel configuration")
+    );
+  }
+});
+
+// Activate Big Wheel
+router.post("/big-wheel/activate", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).send(
+        HelperUtils.errorObj("Configuration ID is required to activate")
+      );
+    }
+    const wheelConfig = await SpinTheWheel.findOne({
+      where: { id },
+      transaction
+    });
+    if (!wheelConfig) {
+      return res.status(404).send(
+        HelperUtils.errorObj("Configuration not found")
+      );
+    }
+    await wheelConfig.update({ is_big: true, updated_at: new Date() }, { transaction });
+    await transaction.commit();
+    res.status(200).send(
+      HelperUtils.successObj("Wheel configuration activated successfully")
+    );
+  }
+  catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error activating wheel configuration:", err);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to activate wheel configuration")
+    );
+  }
+});
+
+// Deactivate Big Wheel
+router.post("/big-wheel/deactivate", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).send(
+        HelperUtils.errorObj("Configuration ID is required to deactivate")
+      );
+    }
+    const wheelConfig = await SpinTheWheel.findOne({
+      where: { id },
+      transaction
+    });
+    if (!wheelConfig) {
+      return res.status(404).send(
+        HelperUtils.errorObj("Active configuration not found")
+      );
+    }
+    await wheelConfig.update({ is_big: false, updated_at: new Date() }, { transaction });
+    await transaction.commit();
+    res.status(200).send(
+      HelperUtils.successObj("Wheel configuration deactivated successfully")
+    );
+  } catch (err) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error deactivating wheel configuration:", err);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to deactivate wheel configuration")
     );
   }
 });

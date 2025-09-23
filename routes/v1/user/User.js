@@ -950,9 +950,10 @@ router.get("/wheel/configuration", userAuthMiddleware, async (req, res) => {
 });
 
 // Season Dashboard
-router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
+router.get('/season/dashboard', async (req, res) => {
   try {
-    const userId = req.user?.userId;
+    const userId = 14;
+    // const userId = req.user?.userId;
 
     let empCode = await Users.findOne({
       where: { id: userId },
@@ -1019,41 +1020,13 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     }
 
     // Define available mini games based on streak/level
-    const allMiniGames = [
-      {
-        name: 'WhackAMole',
-        unlockStreak: 0,
-        displayName: 'Whack A Mole',
-        description: 'Hit the moles as fast as you can!'
-      },
-      {
-        name: 'CrossTheRoad',
-        unlockStreak: 7,
-        displayName: 'Cross The Road',
-        description: 'Navigate safely across busy streets'
-      },
-      {
-        name: 'MemoryMatch',
-        unlockStreak: 14,
-        displayName: 'Memory Match',
-        description: 'Match pairs of cards to test your memory'
-      },
-      {
-        name: 'PuzzleSlider',
-        unlockStreak: 21,
-        displayName: 'Puzzle Slider',
-        description: 'Slide tiles to complete the picture'
-      },
-      {
-        name: 'SpinWheel',
-        unlockStreak: 28,
-        displayName: 'Lucky Spin',
-        description: 'Spin the wheel for bonus XP rewards'
-      }
-    ];
+    const allMiniGames = [0, 1, 2, 3];
+    const unlockedMiniGames = allMiniGames.slice(0, currentWeekNumber);
 
-    const unlockedMiniGames = allMiniGames.filter(game => currentStreak >= game.unlockStreak);
-
+    // Unlock seasons based on current month (0-based)
+    // For currentMonth = 9 (September), this gives [0,1,2,3,4,5,6,7,8]
+    const allSeasonsArray = Array.from({ length: 12 }, (_, i) => i);
+    const seasonUnlocked = allSeasonsArray.slice(0, currentMonth);
     // Calculate season bonus XP multiplier based on week within month
     let bonusSeasonDisplay = 1; // Default multiplier
     if (currentWeekNumber === 1) {
@@ -1070,40 +1043,6 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       'July', 'August', 'September', 'October', 'November', 'December'
     ];
     const currentSeasonName = `${monthNames[currentMonth - 1]} ${currentYear}`;
-
-    // Get mascot weekly tip based on current week and month
-    const mascotTipsByWeek = {
-      1: "🎯 New month, new opportunities! Start this season strong!",
-      2: "⚡ Keep building momentum! You're in the groove now!",
-      3: "🏆 Mid-month push! Your consistency is paying off!",
-      4: "🎊 Final week approach! Make it count!",
-      5: "🌟 Bonus week! Extra days to excel this month!"
-    };
-
-    let mascotWeeklyTip;
-    if (currentStreak === 0) {
-      mascotWeeklyTip = "🔥 Start your attendance streak today! Every journey begins with a single step!";
-    } else if (currentStreak >= 28) {
-      mascotWeeklyTip = "👑 Incredible streak! You're a true attendance champion!";
-    } else {
-      mascotWeeklyTip = mascotTipsByWeek[currentWeekNumber] || "💪 Keep pushing forward! Every day of attendance brings you closer to greatness!";
-    }
-
-    // Add seasonal motivational messages based on month
-    const seasonalMessages = {
-      1: "🎊 New Year, New Goals! Start 2025 with perfect attendance!",
-      2: "💖 Love your work this February! Consistency breeds success!",
-      3: "🌸 Spring into action this March! Fresh opportunities await!",
-      4: "🌷 April showers bring May flowers! Stay consistent!",
-      5: "🌞 May your attendance be as bright as spring sunshine!",
-      6: "☀️ Summer vibes in June! Keep that energy flowing!",
-      7: "🏖️ July heat is on! Stay cool and stay present!",
-      8: "🌻 August abundance! Your dedication is blooming!",
-      9: "🍂 September success! Back to business with style!",
-      10: "🎃 October opportunities! Harvest the rewards of consistency!",
-      11: "🦃 November gratitude! Thankful for your dedication!",
-      12: "🎄 December determination! End the year on a high note!"
-    };
 
     // Add seasonal context to mascot tip
     if (currentWeekNumber === 1) {
@@ -1123,8 +1062,8 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
 
       // Games and bonuses
       miniGamesUnlocked: unlockedMiniGames,
-      bonusSeasonDisplay: bonusSeasonDisplay,
-      mascotWeeklyTip: mascotWeeklyTip,
+      seasonUnlocked,
+      bonusSeasonDisplay,
 
       // Additional user context
       userStats: {
@@ -1149,13 +1088,13 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       },
 
       // All 12 seasons info for reference
-      allSeasons: monthNames.map((month, index) => ({
-        seasonNumber: index + 1,
-        monthName: month,
-        isActive: index + 1 === currentSeason,
-        startDate: new Date(currentYear, index, 1).toISOString().split('T')[0],
-        endDate: new Date(currentYear, index + 1, 0).toISOString().split('T')[0]
-      }))
+      // allSeasons: monthNames.map((month, index) => ({
+      //   seasonNumber: index + 1,
+      //   monthName: month,
+      //   isActive: index + 1 === currentSeason,
+      //   startDate: new Date(currentYear, index, 1).toISOString().split('T')[0],
+      //   endDate: new Date(currentYear, index + 1, 0).toISOString().split('T')[0]
+      // }))
     };
 
     res.status(200).send(
