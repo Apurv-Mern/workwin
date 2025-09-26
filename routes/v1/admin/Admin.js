@@ -2162,7 +2162,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const { id, sections, xpValues, totalXP } = req.body;
+    const { id, sections, xpValues, totalXP, type } = req.body;
 
     // Validation
     if (!sections || sections < 2 || sections > 20) {
@@ -2177,22 +2177,15 @@ router.post("/wheel/save-configuration", async (req, res) => {
       );
     }
 
-    // Validate each XP value
-    for (let i = 0; i < xpValues.length; i++) {
-      if (typeof xpValues[i] !== 'number' || xpValues[i] < 0) {
-        return res.status(400).send(
-          HelperUtils.errorObj(`XP value at index ${i} must be a valid positive number`)
-        );
-      }
-    }
-
     // Calculate and verify total XP
     const calculatedTotal = xpValues.reduce((sum, xp) => sum + xp, 0);
 
-    if (totalXP && totalXP !== calculatedTotal) {
-      return res.status(400).send(
-        HelperUtils.errorObj(`Total XP mismatch. Expected: ${calculatedTotal}, Received: ${totalXP}`)
-      );
+    if (type === "xp") {
+      if (totalXP && totalXP !== calculatedTotal) {
+        return res.status(400).send(
+          HelperUtils.errorObj(`Total XP mismatch. Expected: ${calculatedTotal}, Received: ${totalXP}`)
+        );
+      }
     }
 
     // Convert to internal format for storage
@@ -2210,7 +2203,8 @@ router.post("/wheel/save-configuration", async (req, res) => {
     const configData = {
       number_of_sections: sections,
       sections: JSON.stringify(sectionsData),
-      total_xp_pool: calculatedTotal,
+      total_xp_pool: type === "xp" ? calculatedTotal : 0,
+      type: type,
       is_active: true,
       is_global: true,
       created_by: "admin",
@@ -2268,7 +2262,8 @@ router.get("/wheel/configuration/:id", async (req, res) => {
         'sections',
         'total_xp_pool',
         'is_active',
-        "is_big"
+        "is_big",
+        "type"
       ]
     });
 
@@ -2285,7 +2280,8 @@ router.get("/wheel/configuration/:id", async (req, res) => {
       sections: JSON.parse(wheelConfig.sections),
       totalXpPool: wheelConfig.total_xp_pool,
       isActive: wheelConfig.is_active,
-      isBig: wheelConfig.is_big
+      isBig: wheelConfig.is_big,
+      type: wheelConfig.type
     };
 
     res.status(200).send(
