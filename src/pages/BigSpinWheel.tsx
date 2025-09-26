@@ -25,6 +25,10 @@ const BigSpinWheel = () => {
     const [sectionXpValues, setSectionXpValues] = useState<number[]>(
         Array.from({ length: 8 }, (_, index) => (index + 1) * 200)
     );
+    const [rewardType, setRewardType] = useState<"XP" | "Rewards">("XP");
+    const [sectionRewards, setSectionRewards] = useState<string[]>(
+        Array.from({ length: 8 }, (_, index) => `Big Reward ${index + 1}`)
+    );
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isActivating, setIsActivating] = useState(false);
@@ -63,12 +67,28 @@ const BigSpinWheel = () => {
                     numberOfSections,
                     sections,
                     isBig: wheelIsActive,
+                    type,
                 } = response.result;
                 setWheelSections(numberOfSections);
                 setIsActive(wheelIsActive || false);
 
+                // Set reward type based on API response
+                if (type) {
+                    setRewardType(type === "xp" ? "XP" : "Rewards");
+                }
+
                 const xpValues = sections.map((section: any) => section.xpValue);
                 setSectionXpValues(xpValues);
+
+                // If type is rewards, also set the reward texts
+                if (type === "rewards") {
+                    const rewardTexts = sections.map((section: any) => section.xpValue); // Load from xpValue field since rewards are stored there
+                    setSectionRewards(rewardTexts);
+                } else {
+                    // For XP type, keep default reward texts
+                    const defaultRewards = Array.from({ length: numberOfSections }, (_, index) => `Big Reward ${index + 1}`);
+                    setSectionRewards(defaultRewards);
+                }
             }
         } catch (error: any) {
             console.log("No existing configuration found or failed to load:", error);
@@ -93,8 +113,13 @@ const BigSpinWheel = () => {
             return;
         }
 
-        if (sectionXpValues.some((xp) => xp < 0 || !Number.isInteger(xp))) {
+        if (rewardType === "XP" && sectionXpValues.some((xp) => xp < 0 || !Number.isInteger(xp))) {
             showNotification("All XP values must be positive integers", "danger");
+            return;
+        }
+
+        if (rewardType === "Rewards" && sectionRewards.some((reward) => !reward || reward.trim() === "")) {
+            showNotification("All reward descriptions must be filled", "danger");
             return;
         }
 
@@ -103,10 +128,15 @@ const BigSpinWheel = () => {
             const configData = {
                 id: 2,
                 sections: wheelSections,
-                xpValues: sectionXpValues,
+                xpValues: rewardType === "XP" ? sectionXpValues : sectionRewards, // Send rewards in xpValues when type is rewards
+                rewardTexts: sectionRewards,
                 totalXP: totalXP,
+                type: rewardType.toLowerCase(), // Send "xp" or "rewards"
             };
 
+            console.log("Current reward type:", rewardType);
+            console.log("Section rewards:", sectionRewards);
+            console.log("Section XP values:", sectionXpValues);
             console.log("Saving big wheel configuration:", configData);
             const response = await saveWheelConfigurationRequest(configData);
             console.log("Save Response:", response); // Debug log
@@ -180,6 +210,18 @@ const BigSpinWheel = () => {
             return sectionXpValues[index] || (index + 1) * 200; // Higher default for big wheel
         });
         setSectionXpValues(newXpValues);
+
+        // Adjust rewards array to match new section count
+        const newRewards = Array.from({ length: newSections }, (_, index) => {
+            return sectionRewards[index] || `Big Reward ${index + 1}`;
+        });
+        setSectionRewards(newRewards);
+    };
+
+    const handleRewardChange = (sectionIndex: number, reward: string) => {
+        const newRewards = [...sectionRewards];
+        newRewards[sectionIndex] = reward;
+        setSectionRewards(newRewards);
     };
 
     const handleXpValueChange = (sectionIndex: number, xpValue: number) => {
@@ -254,6 +296,50 @@ const BigSpinWheel = () => {
                         </Card.Header>
                         <Card.Body>
                             <Form.Group className="mb-3">
+                                <Form.Label>Reward Type</Form.Label>
+                                <Form.Select
+                                    value={rewardType}
+                                    onChange={(e) => setRewardType(e.target.value as "XP" | "Rewards")}
+                                >
+                                    <option value="XP">XP</option>
+                                    <option value="Rewards">Rewards</option>
+                                </Form.Select>
+                                <Form.Text className="text-muted">
+                                    Choose between XP points or custom rewards
+                                </Form.Text>
+                            </Form.Group>
+
+                            {/* {rewardType === "XP" && (
+                                <Form.Group className="mb-3">
+                                    <Form.Label>XP Value</Form.Label>
+                                    <Form.Control
+                                        type="number"
+                                        min="1"
+                                        value={xpValue}
+                                        onChange={(e) => setXpValue(parseInt(e.target.value) || 200)}
+                                    />
+                                    <Form.Text className="text-muted">
+                                        Enter XP value for sections
+                                    </Form.Text>
+                                </Form.Group>
+                            )}
+
+                            {rewardType === "Rewards" && (
+                                <Form.Group className="mb-3">
+                                    <Form.Label>Reward Text</Form.Label>
+                                    <Form.Control
+                                        type="text"
+                                        value={rewardText}
+                                        onChange={(e) => setRewardText(e.target.value)}
+                                        placeholder="Enter reward description"
+                                    />
+                                    <Form.Text className="text-muted">
+                                        Enter text description for the reward
+                                    </Form.Text>
+                                </Form.Group>
+                            )} */}
+
+                            {/* <Form.Group className="mb-3">
                                 <Form.Label>Number of Sections</Form.Label>
                                 <Form.Control
                                     type="number"
@@ -267,48 +353,77 @@ const BigSpinWheel = () => {
                                 <Form.Text className="text-muted">
                                     Minimum 2, Maximum 10 sections
                                 </Form.Text>
-                            </Form.Group>
+                            </Form.Group> */}
 
                             <div className="mb-3">
-                                <Form.Label>XP Values for Each Section</Form.Label>
+                                <Form.Label>
+                                    {rewardType === "XP" ? "XP Values for Each Section" : "Rewards for Each Section"}
+                                </Form.Label>
                                 <div
                                     className="row g-2"
                                     style={{ maxHeight: "200px", overflowY: "auto" }}
                                 >
-                                    {sectionXpValues.map((xpValue, index) => (
-                                        <div key={index} className="col-6">
-                                            <Form.Group>
-                                                <Form.Label className="small">
-                                                    Section {index + 1}
-                                                </Form.Label>
-                                                <Form.Control
-                                                    type="number"
-                                                    min="1"
-                                                    value={xpValue}
-                                                    onChange={(e) =>
-                                                        handleXpValueChange(
-                                                            index,
-                                                            parseInt(e.target.value) || 200
-                                                        )
-                                                    }
-                                                    size="sm"
-                                                />
-                                            </Form.Group>
-                                        </div>
-                                    ))}
+                                    {rewardType === "XP" ? (
+                                        sectionXpValues.map((xpValue, index) => (
+                                            <div key={index} className="col-6">
+                                                <Form.Group>
+                                                    <Form.Label className="small">
+                                                        Section {index + 1}
+                                                    </Form.Label>
+                                                    <Form.Control
+                                                        type="number"
+                                                        min="1"
+                                                        value={xpValue}
+                                                        onChange={(e) =>
+                                                            handleXpValueChange(
+                                                                index,
+                                                                parseInt(e.target.value) || 200
+                                                            )
+                                                        }
+                                                        size="sm"
+                                                    />
+                                                </Form.Group>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        sectionRewards.map((reward, index) => (
+                                            <div key={index} className="col-6">
+                                                <Form.Group>
+                                                    <Form.Label className="small">
+                                                        Section {index + 1}
+                                                    </Form.Label>
+                                                    <Form.Control
+                                                        type="text"
+                                                        value={reward}
+                                                        onChange={(e) =>
+                                                            handleRewardChange(index, e.target.value)
+                                                        }
+                                                        size="sm"
+                                                        placeholder="Enter reward"
+                                                    />
+                                                </Form.Group>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                                 <Form.Text className="text-muted">
-                                    Customize XP for each section (recommended: higher values than
-                                    mini wheel)
+                                    {rewardType === "XP"
+                                        ? "Customize XP for each section (recommended: higher values than mini wheel)"
+                                        : "Customize rewards for each section individually"}
                                 </Form.Text>
                             </div>
 
                             <Alert variant="info" className="mb-3">
                                 <div className="d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>Total XP Pool:</strong> {totalXP.toLocaleString()}{" "}
-                                        XP
-                                    </div>
+                                    {
+                                        rewardType === "XP" && (
+                                            <div>
+                                                <strong>Total XP:</strong> {totalXP.toLocaleString()}{" "}
+                                                XP
+                                            </div>
+                                        )
+                                    }
+
                                     <small className="text-muted">
                                         {sectionXpValues.length} sections configured
                                     </small>
@@ -514,7 +629,9 @@ const BigSpinWheel = () => {
                                                                 dy="16"
                                                                 fontSize={wheelSections > 10 ? "10" : "12"}
                                                             >
-                                                                {sectionXpValues[index].toLocaleString()} XP
+                                                                {rewardType === "XP"
+                                                                    ? `${sectionXpValues[index].toLocaleString()} XP`
+                                                                    : sectionRewards[index]}
                                                             </tspan>
                                                         </text>
                                                     </g>
@@ -672,7 +789,9 @@ const BigSpinWheel = () => {
                                                         )}
                                                         Section {index + 1}
                                                         <br />
-                                                        {sectionXpValues[index].toLocaleString()} XP
+                                                        {rewardType === "XP"
+                                                            ? `${sectionXpValues[index].toLocaleString()} XP`
+                                                            : sectionRewards[index]}
                                                     </div>
                                                 </div>
                                             );

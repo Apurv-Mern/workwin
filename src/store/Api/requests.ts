@@ -261,9 +261,12 @@ export const getProgressReportRequest = async (id: any) => {
 };
 
 export interface WheelConfigurationData {
+  id?: number;
   sections: number;
-  xpValues: number[];
+  xpValues: (number | string)[];
+  rewardTexts?: string[];
   totalXP: number;
+  type?: string;
 }
 
 export interface BigWheelActivate {
