@@ -1208,10 +1208,60 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
       return formattedRecord;
     });
 
+    // Calculate monthly max streak data
+    const calculateMonthlyMaxStreak = (records) => {
+      const monthlyData = {};
+
+      // Initialize all 12 months for the year
+      for (let month = 1; month <= 12; month++) {
+        const monthKey = `${year}-${month.toString().padStart(2, '0')}`;
+        monthlyData[monthKey] = {
+          month: monthKey,
+          monthName: new Date(year, month - 1, 1).toLocaleString('default', { month: 'long' }),
+          maxStreak: 0,
+          maxStreakStartDate: null,
+          maxStreakEndDate: null,
+          records: []
+        };
+      }
+
+      records.forEach(record => {
+        const date = new Date(record.week_start_date);
+        const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+
+        if (monthlyData[monthKey]) {
+          monthlyData[monthKey].records.push(record);
+
+          // Update max streak for this month
+          if (record.max_streak > monthlyData[monthKey].maxStreak) {
+            monthlyData[monthKey].maxStreak = record.max_streak;
+            monthlyData[monthKey].maxStreakStartDate = record.week_start_date;
+            monthlyData[monthKey].maxStreakEndDate = record.week_end_date;
+          }
+        }
+      });
+
+      // Return array of all months with their data
+      return Object.values(monthlyData).map(monthData => ({
+        month: monthData.month,
+        monthName: monthData.monthName,
+        maxStreak: monthData.maxStreak,
+        startDate: monthData.maxStreakStartDate,
+        endDate: monthData.maxStreakEndDate,
+        totalWeeks: monthData.records.length,
+        hasData: monthData.records.length > 0
+      }));
+    };
+
+    const monthlyMaxStreakData = calculateMonthlyMaxStreak(attendanceRecords);
+
     res.status(200).send(
       HelperUtils.successObj(
         `Attendance data fetched successfully for year ${year}`,
-        groupedData
+        {
+          weeklyData: groupedData,
+          months: monthlyMaxStreakData
+        }
       )
     );
 
