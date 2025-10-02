@@ -14,6 +14,7 @@ import {
 import {
   saveWheelConfigurationRequest,
   getWheelConfigurationRequest,
+  uploadRewardImageRequest,
 } from "../store/Api/requests";
 
 const MiniSpinWheel = () => {
@@ -21,12 +22,17 @@ const MiniSpinWheel = () => {
   const [sectionXpValues, setSectionXpValues] = useState<number[]>(
     Array.from({ length: 8 }, (_, index) => (index + 1) * 100)
   );
-  const [rewardType, setRewardType] = useState<"XP" | "Rewards">("XP");
   const [sectionRewards, setSectionRewards] = useState<string[]>(
     Array.from({ length: 8 }, (_, index) => `Reward ${index + 1}`)
   );
-  const [xpValue, setXpValue] = useState<number>(100);
-  const [rewardText, setRewardText] = useState<string>("");
+  const [sectionTypes, setSectionTypes] = useState<("XP" | "Rewards")[]>(
+    Array.from({ length: 8 }, (_, index) =>
+      index % 2 === 0 ? "XP" : "Rewards"
+    )
+  );
+  const [sectionImages, setSectionImages] = useState<string[]>(
+    Array.from({ length: 8 }, () => "")
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -34,6 +40,9 @@ const MiniSpinWheel = () => {
   const [toastVariant, setToastVariant] = useState<"success" | "danger">(
     "success"
   );
+  const [uploadingImages, setUploadingImages] = useState<{
+    [key: number]: boolean;
+  }>({});
 
   // Load existing configuration on component mount
   useEffect(() => {
@@ -44,37 +53,79 @@ const MiniSpinWheel = () => {
     setIsLoading(true);
     try {
       const response = await getWheelConfigurationRequest(1);
-      console.log("Mini Wheel API Response:", response); // Debug log
+      console.log("API Response:", response); // Debug log
 
       // Handle the actual API response structure
       if (response.flag && response.result) {
         const { numberOfSections, sections, type } = response.result;
 
-        console.log("Setting mini wheel sections:", numberOfSections); // Debug log
-        console.log("Setting mini sections data:", sections); // Debug log
-        console.log("Setting mini wheel type:", type); // Debug log
-
         setWheelSections(numberOfSections);
 
-        // Set reward type based on API response
-        if (type) {
-          setRewardType(type === "xp" ? "XP" : "Rewards");
-        }
+        // Determine section types based on the data in sections array
+        const newSectionTypes: ("XP" | "Rewards")[] = [];
+        const xpValues: number[] = [];
+        const rewardTexts: string[] = [];
+        const imageUrls: string[] = [];
 
-        // Extract XP values from sections array
-        const xpValues = sections.map((section: any) => section.xpValue);
-        console.log("Setting mini XP values:", xpValues); // Debug log
-        setSectionXpValues(xpValues);
+        if (sections && Array.isArray(sections)) {
+          for (let i = 0; i < numberOfSections; i++) {
+            const section = sections[i];
+            const xpValue = section?.xpValue;
 
-        // If type is rewards, also set the reward texts
-        if (type === "rewards") {
-          const rewardTexts = sections.map((section: any) => section.xpValue); // Load from xpValue field since rewards are stored there
-          setSectionRewards(rewardTexts);
+            // Determine if this section contains XP (number) or Reward (string)
+            if (typeof xpValue === "number") {
+              newSectionTypes[i] = "XP";
+              xpValues[i] = xpValue;
+              rewardTexts[i] = `Reward ${i + 1}`; // Default reward text
+            } else if (typeof xpValue === "string") {
+              newSectionTypes[i] = "Rewards";
+              xpValues[i] = (i + 1) * 100; // Default XP value
+              rewardTexts[i] = xpValue; // Use the string as reward text
+            } else {
+              // Fallback for missing data
+              newSectionTypes[i] = i % 2 === 0 ? "XP" : "Rewards";
+              xpValues[i] = (i + 1) * 100;
+              rewardTexts[i] = `Reward ${i + 1}`;
+            }
+
+            // Load image URLs if they exist
+            imageUrls[i] = "";
+          }
         } else {
-          // For XP type, keep default reward texts
-          const defaultRewards = Array.from({ length: numberOfSections }, (_, index) => `Reward ${index + 1}`);
-          setSectionRewards(defaultRewards);
+          // Fallback if no sections data available
+          for (let i = 0; i < numberOfSections; i++) {
+            newSectionTypes[i] = i % 2 === 0 ? "XP" : "Rewards";
+            xpValues[i] = (i + 1) * 100;
+            rewardTexts[i] = `Reward ${i + 1}`;
+            imageUrls[i] = "";
+          }
         }
+
+        // Load reward images if they exist
+        if (
+          response.result.reward_images &&
+          Array.isArray(response.result.reward_images)
+        ) {
+          response.result.reward_images.forEach(
+            (imageUrl: string, index: number) => {
+              if (index < numberOfSections) {
+                imageUrls[index] = imageUrl || "";
+              }
+            }
+          );
+        }
+
+        setSectionTypes(newSectionTypes);
+        setSectionXpValues(xpValues);
+        setSectionRewards(rewardTexts);
+        setSectionImages(imageUrls);
+
+        console.log("Loaded data:", {
+          newSectionTypes,
+          xpValues,
+          rewardTexts,
+          imageUrls,
+        }); // Debug log
       }
     } catch (error: any) {
       console.log("No existing configuration found or failed to load:", error);
@@ -93,6 +144,20 @@ const MiniSpinWheel = () => {
     setShowToast(true);
   };
 
+  const uploadRewardImage = async (file: File): Promise<string> => {
+    try {
+      const result = await uploadRewardImageRequest(file);
+      if (result.flag && result.result?.imagePath) {
+        return result.result.imagePath;
+      } else {
+        throw new Error(result.message || "Failed to upload image");
+      }
+    } catch (error: any) {
+      console.error("Error uploading image:", error);
+      throw error;
+    }
+  };
+
   const handleSave = async () => {
     // Validation
     if (wheelSections < 2 || wheelSections > 20) {
@@ -100,33 +165,49 @@ const MiniSpinWheel = () => {
       return;
     }
 
-    if (rewardType === "XP" && sectionXpValues.some((xp) => xp < 0 || !Number.isInteger(xp))) {
+    // Validate XP sections - must be positive integers
+    const xpSections = sectionTypes
+      .map((type, index) => ({ type, index }))
+      .filter((s) => s.type === "XP");
+    const invalidXpSections = xpSections.filter(
+      (s) =>
+        sectionXpValues[s.index] < 0 ||
+        !Number.isInteger(sectionXpValues[s.index])
+    );
+    if (invalidXpSections.length > 0) {
       showNotification("All XP values must be positive integers", "danger");
       return;
     }
 
-    if (rewardType === "Rewards" && sectionRewards.some((reward) => !reward || reward.trim() === "")) {
+    // Validate reward sections - must be non-empty strings
+    const rewardSections = sectionTypes
+      .map((type, index) => ({ type, index }))
+      .filter((s) => s.type === "Rewards");
+    const invalidRewardSections = rewardSections.filter(
+      (s) => !sectionRewards[s.index] || sectionRewards[s.index].trim() === ""
+    );
+    if (invalidRewardSections.length > 0) {
       showNotification("All reward descriptions must be filled", "danger");
       return;
     }
 
     setIsSaving(true);
     try {
+      // Create mixed data array based on section types
+      const mixedData = sectionTypes.map((type, index) =>
+        type === "XP" ? sectionXpValues[index] : sectionRewards[index]
+      );
+
       const configData = {
         id: 1,
         sections: wheelSections,
-        xpValues: rewardType === "XP" ? sectionXpValues : sectionRewards, // Send rewards in xpValues when type is rewards
-        rewardTexts: sectionRewards,
+        xpValues: mixedData, // Mixed array of XP values and reward texts
+        sectionTypes: sectionTypes, // Send section types to backend
         totalXP: totalXP,
-        type: rewardType.toLowerCase(), // Send "xp" or "rewards"
+        type: "mixed", // Indicate this is a mixed configuration
+        reward_images: sectionImages, // Include reward images
       };
-
-      console.log("Current reward type:", rewardType);
-      console.log("Section rewards:", sectionRewards);
-      console.log("Section XP values:", sectionXpValues);
-      console.log("Saving wheel configuration:", configData);
       const response = await saveWheelConfigurationRequest(configData);
-      console.log("Mini Save Response:", response); // Debug log
 
       if (response) {
         showNotification("Wheel configuration saved successfully!");
@@ -144,6 +225,7 @@ const MiniSpinWheel = () => {
 
   const handleWheelSectionsChange = (newSections: number) => {
     setWheelSections(newSections);
+
     // Adjust XP values array to match new section count
     const newXpValues = Array.from({ length: newSections }, (_, index) => {
       return sectionXpValues[index] || (index + 1) * 100;
@@ -155,6 +237,27 @@ const MiniSpinWheel = () => {
       return sectionRewards[index] || `Reward ${index + 1}`;
     });
     setSectionRewards(newRewards);
+
+    // Adjust section types array (alternating XP and Rewards)
+    const newSectionTypes = Array.from({ length: newSections }, (_, index) =>
+      index % 2 === 0 ? ("XP" as const) : ("Rewards" as const)
+    );
+    setSectionTypes(newSectionTypes);
+
+    // Adjust images array to match new section count
+    const newImages = Array.from({ length: newSections }, (_, index) => {
+      return sectionImages[index] || "";
+    });
+    setSectionImages(newImages);
+  };
+
+  const handleSectionTypeChange = (
+    sectionIndex: number,
+    type: "XP" | "Rewards"
+  ) => {
+    const newSectionTypes = [...sectionTypes];
+    newSectionTypes[sectionIndex] = type;
+    setSectionTypes(newSectionTypes);
   };
 
   const handleRewardChange = (sectionIndex: number, reward: string) => {
@@ -167,6 +270,33 @@ const MiniSpinWheel = () => {
     const newXpValues = [...sectionXpValues];
     newXpValues[sectionIndex] = xpValue;
     setSectionXpValues(newXpValues);
+  };
+
+  const handleImageUpload = async (sectionIndex: number, file: File) => {
+    if (!file) return;
+
+    setUploadingImages((prev) => ({ ...prev, [sectionIndex]: true }));
+
+    try {
+      const imagePath = await uploadRewardImage(file);
+      const newImages = [...sectionImages];
+      newImages[sectionIndex] = imagePath;
+      setSectionImages(newImages);
+      showNotification(
+        `Image uploaded successfully for Section ${sectionIndex + 1}`
+      );
+    } catch (error: any) {
+      console.error("Failed to upload image:", error);
+      showNotification(error.message || "Failed to upload image", "danger");
+    } finally {
+      setUploadingImages((prev) => ({ ...prev, [sectionIndex]: false }));
+    }
+  };
+
+  const removeImage = (sectionIndex: number) => {
+    const newImages = [...sectionImages];
+    newImages[sectionIndex] = "";
+    setSectionImages(newImages);
   };
 
   const totalXP = sectionXpValues.reduce((sum, xp) => sum + xp, 0);
@@ -217,50 +347,6 @@ const MiniSpinWheel = () => {
             </Card.Header>
             <Card.Body>
               <Form.Group className="mb-3">
-                <Form.Label>Reward Type</Form.Label>
-                <Form.Select
-                  value={rewardType}
-                  onChange={(e) => setRewardType(e.target.value as "XP" | "Rewards")}
-                >
-                  <option value="XP">XP</option>
-                  <option value="Rewards">Rewards</option>
-                </Form.Select>
-                <Form.Text className="text-muted">
-                  Choose between XP points or custom rewards
-                </Form.Text>
-              </Form.Group>
-
-              {/* {rewardType === "XP" && (
-                <Form.Group className="mb-3">
-                  <Form.Label>XP Value</Form.Label>
-                  <Form.Control
-                    type="number"
-                    min="1"
-                    value={xpValue}
-                    onChange={(e) => setXpValue(parseInt(e.target.value) || 100)}
-                  />
-                  <Form.Text className="text-muted">
-                    Enter XP value for sections
-                  </Form.Text>
-                </Form.Group>
-              )}
-
-              {rewardType === "Rewards" && (
-                <Form.Group className="mb-3">
-                  <Form.Label>Reward Text</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={rewardText}
-                    onChange={(e) => setRewardText(e.target.value)}
-                    placeholder="Enter reward description"
-                  />
-                  <Form.Text className="text-muted">
-                    Enter text description for the reward
-                  </Form.Text>
-                </Form.Group>
-              )} */}
-
-              {/* <Form.Group className="mb-3">
                 <Form.Label>Number of Sections</Form.Label>
                 <Form.Control
                   type="number"
@@ -272,69 +358,130 @@ const MiniSpinWheel = () => {
                   }
                 />
                 <Form.Text className="text-muted">
-                  Minimum 2, Maximum 10 sections
+                  Minimum 2, Maximum 10 sections (Mix of XP and Rewards)
                 </Form.Text>
-              </Form.Group> */}
+              </Form.Group>
 
               <div className="mb-3">
-                <Form.Label>
-                  {rewardType === "XP" ? "XP Values for Each Section" : "Rewards for Each Section"}
-                </Form.Label>
+                <Form.Label>Configure Each Section</Form.Label>
                 <div
                   className="row g-2"
-                  style={{ maxHeight: "200px", overflowY: "auto" }}
+                  style={{ maxHeight: "300px", overflowY: "auto" }}
                 >
-                  {rewardType === "XP" ? (
-                    sectionXpValues.map((xpValue, index) => (
-                      <div key={index} className="col-6">
-                        <Form.Group>
-                          <Form.Label className="small">
-                            Section {index + 1}
-                          </Form.Label>
-                          <Form.Control
-                            type="number"
-                            min="1"
-                            value={xpValue}
-                            onChange={(e) =>
-                              handleXpValueChange(
-                                index,
-                                parseInt(e.target.value) || 100
-                              )
-                            }
-                            size="sm"
-                          />
-                        </Form.Group>
-                      </div>
-                    ))
-                  ) : (
-                    sectionRewards.map((reward, index) => (
-                      <div key={index} className="col-6">
-                        <Form.Group>
-                          <Form.Label className="small">
-                            Section {index + 1}
-                          </Form.Label>
-                          <Form.Control
-                            type="text"
-                            value={reward}
-                            onChange={(e) =>
-                              handleRewardChange(index, e.target.value)
-                            }
-                            size="sm"
-                            placeholder="Enter reward"
-                          />
-                        </Form.Group>
-                      </div>
-                    ))
-                  )}
+                  {sectionTypes.map((sectionType, index) => (
+                    <div key={index} className="col-12 mb-3">
+                      <Card>
+                        <Card.Body className="p-2">
+                          <div className="d-flex justify-content-between align-items-center mb-2">
+                            <Form.Label className="small mb-0">
+                              Section {index + 1}
+                            </Form.Label>
+                            <Form.Select
+                              size="sm"
+                              style={{ width: "auto" }}
+                              value={sectionType}
+                              onChange={(e) =>
+                                handleSectionTypeChange(
+                                  index,
+                                  e.target.value as "XP" | "Rewards"
+                                )
+                              }
+                            >
+                              <option value="XP">XP</option>
+                              <option value="Rewards">Rewards</option>
+                            </Form.Select>
+                          </div>
+
+                          {sectionType === "XP" ? (
+                            <Form.Control
+                              type="number"
+                              min="1"
+                              value={sectionXpValues[index]}
+                              onChange={(e) =>
+                                handleXpValueChange(
+                                  index,
+                                  parseInt(e.target.value) || 100
+                                )
+                              }
+                              size="sm"
+                              placeholder="Enter XP value"
+                            />
+                          ) : (
+                            <div>
+                              <Form.Control
+                                type="text"
+                                value={sectionRewards[index]}
+                                onChange={(e) =>
+                                  handleRewardChange(index, e.target.value)
+                                }
+                                size="sm"
+                                placeholder="Enter reward description"
+                                className="mb-2"
+                              />
+
+                              {/* Image Upload for Rewards */}
+                              <div className="d-flex align-items-center gap-2">
+                                <Form.Control
+                                  type="file"
+                                  size="sm"
+                                  accept="image/*"
+                                  onChange={(e) => {
+                                    const target = e.target as HTMLInputElement;
+                                    const file = target.files?.[0];
+                                    if (file) {
+                                      handleImageUpload(index, file);
+                                    }
+                                  }}
+                                  disabled={uploadingImages[index]}
+                                  style={{ fontSize: "0.75rem" }}
+                                />
+                                {uploadingImages[index] && (
+                                  <Spinner size="sm" animation="border" />
+                                )}
+                              </div>
+
+                              {/* Show uploaded image preview */}
+                              {sectionImages[index] && (
+                                <div className="mt-2">
+                                  <div className="d-flex align-items-center justify-content-between">
+                                    <img
+                                      src={`${sectionImages[index]}`}
+                                      alt={`Reward ${index + 1}`}
+                                      style={{
+                                        width: "40px",
+                                        height: "40px",
+                                        objectFit: "cover",
+                                        borderRadius: "4px",
+                                      }}
+                                    />
+                                    <Button
+                                      variant="outline-danger"
+                                      size="sm"
+                                      onClick={() => removeImage(index)}
+                                      className="ms-2"
+                                      style={{
+                                        fontSize: "0.7rem",
+                                        padding: "2px 6px",
+                                      }}
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </Card.Body>
+                      </Card>
+                    </div>
+                  ))}
                 </div>
                 <Form.Text className="text-muted">
-                  {rewardType === "XP"
-                    ? "Customize XP for each section individually"
-                    : "Customize rewards for each section individually"}
+                  Configure each section individually as XP or Reward
                 </Form.Text>
               </div>
 
-              <Alert variant="info" className="mb-3">
+              {/* <Alert variant="info" className="mb-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div>
                     <strong>Total XP Pool:</strong> {totalXP.toLocaleString()}{" "}
@@ -344,7 +491,7 @@ const MiniSpinWheel = () => {
                     {sectionXpValues.length} sections configured
                   </small>
                 </div>
-              </Alert>
+              </Alert> */}
 
               <Button
                 variant="success"
@@ -464,10 +611,13 @@ const MiniSpinWheel = () => {
                                 textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
                                 pointerEvents: "none",
                               }}
-                              transform={`rotate(${(midAngle * 180) / Math.PI
-                                }, ${centerX + radius * 0.7 * Math.cos(midAngle)
-                                }, ${centerY + radius * 0.7 * Math.sin(midAngle)
-                                })`}
+                              transform={`rotate(${
+                                (midAngle * 180) / Math.PI
+                              }, ${
+                                centerX + radius * 0.7 * Math.cos(midAngle)
+                              }, ${
+                                centerY + radius * 0.7 * Math.sin(midAngle)
+                              })`}
                             >
                               <tspan
                                 x={centerX + radius * 0.7 * Math.cos(midAngle)}
@@ -480,7 +630,7 @@ const MiniSpinWheel = () => {
                                 dy="12"
                                 fontSize={wheelSections > 10 ? "8" : "10"}
                               >
-                                {rewardType === "XP"
+                                {sectionTypes[index] === "XP"
                                   ? `${sectionXpValues[index]} XP`
                                   : sectionRewards[index]}
                               </tspan>
@@ -547,25 +697,7 @@ const MiniSpinWheel = () => {
                           "0 4px 15px rgba(0,0,0,0.2), inset 0 2px 5px rgba(255,255,255,0.3)",
                         zIndex: 10,
                       }}
-                    >
-                    </div>
-
-                    {/* Pointer/Arrow */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "-10px",
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        width: "0",
-                        height: "0",
-                        borderLeft: "15px solid transparent",
-                        borderRight: "15px solid transparent",
-                        borderBottom: "25px solid #34a853",
-                        zIndex: 15,
-                        filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))",
-                      }}
-                    />
+                    ></div>
                   </div>
                 </div>
 
@@ -606,12 +738,13 @@ const MiniSpinWheel = () => {
                       return (
                         <div key={index} className="col-3 col-md-2 mb-2">
                           <div
-                            className={`badge ${isHighestXP
-                              ? "bg-warning text-dark"
-                              : isLowestXP
+                            className={`badge ${
+                              isHighestXP
+                                ? "bg-warning text-dark"
+                                : isLowestXP
                                 ? "bg-light text-dark"
                                 : "bg-secondary"
-                              }`}
+                            }`}
                             style={{
                               fontSize: "0.75rem",
                               position: "relative",
@@ -631,7 +764,7 @@ const MiniSpinWheel = () => {
                             )}
                             Section {index + 1}
                             <br />
-                            {rewardType === "XP"
+                            {sectionTypes[index] === "XP"
                               ? `${sectionXpValues[index]} XP`
                               : sectionRewards[index]}
                           </div>
@@ -672,4 +805,3 @@ const MiniSpinWheel = () => {
 };
 
 export default MiniSpinWheel;
-

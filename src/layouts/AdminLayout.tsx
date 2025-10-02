@@ -6,7 +6,6 @@ import {
   Container,
   Button,
   Dropdown,
-  Form,
 } from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import { logout } from "../store/slices/authSlice";
@@ -26,9 +25,6 @@ const AdminLayout: React.FC = () => {
     window.innerWidth < 992
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [wheelSections, setWheelSections] = useState(8);
-  const [xpPerSection, setXpPerSection] = useState(100);
-
   const toggleSidebar = () => {
     const newCollapsedState = !sidebarCollapsed;
     setSidebarCollapsed(newCollapsedState);
@@ -150,8 +146,8 @@ const AdminLayout: React.FC = () => {
               as={Link}
               to="/dashboard"
               className={`py-3 ${location.pathname === "/dashboard"
-                  ? "active bg-primary text-white"
-                  : ""
+                ? "active bg-primary text-white"
+                : ""
                 }`}
             >
               <i className="bi bi-speedometer2 me-3"></i>
@@ -164,8 +160,8 @@ const AdminLayout: React.FC = () => {
                 as={Link}
                 to="/users"
                 className={`py-3 ${location.pathname.startsWith("/users")
-                    ? "active bg-primary text-white"
-                    : ""
+                  ? "active bg-primary text-white"
+                  : ""
                   }`}
               >
                 <i className="bi bi-people me-3"></i>
@@ -177,8 +173,8 @@ const AdminLayout: React.FC = () => {
                 as={Link}
                 to="/role/management"
                 className={`py-3 ${location.pathname === "/role/management"
-                    ? "active bg-primary text-white"
-                    : ""
+                  ? "active bg-primary text-white"
+                  : ""
                   }`}
               >
                 <i className="bi bi-trophy me-3"></i>
@@ -192,8 +188,8 @@ const AdminLayout: React.FC = () => {
               as={Link}
               to="/xp-system"
               className={`py-3 ${location.pathname === "/xp-system"
-                  ? "active bg-primary text-white"
-                  : ""
+                ? "active bg-primary text-white"
+                : ""
                 }`}
             >
               <i className="bi bi-trophy me-3"></i>
@@ -206,8 +202,8 @@ const AdminLayout: React.FC = () => {
                 as={Link}
                 to="/leaderboard"
                 className={`py-3 ${location.pathname === "/leaderboard"
-                    ? "active bg-primary text-white"
-                    : ""
+                  ? "active bg-primary text-white"
+                  : ""
                   }`}
               >
                 <i className="bi bi-trophy me-3"></i>
@@ -222,8 +218,8 @@ const AdminLayout: React.FC = () => {
                 as={Link}
                 to="/reward"
                 className={`py-3 ${location.pathname === "/reward"
-                    ? "active bg-primary text-white"
-                    : ""
+                  ? "active bg-primary text-white"
+                  : ""
                   }`}
               >
                 <i className="bi bi-bar-chart-steps me-3"></i>
@@ -235,13 +231,13 @@ const AdminLayout: React.FC = () => {
               as={Link}
               to="/mini-spin-wheel"
               className={`py-3 ${location.pathname === "/mini-spin-wheel"
-                  ? "active bg-primary text-white"
-                  : ""
+                ? "active bg-primary text-white"
+                : ""
                 }`}
             >
               <i className="bi bi-arrow-clockwise me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
-                Mini Spin the Wheel
+                Pixie Wheel
               </span>
             </LinkNavItem>
 
@@ -249,13 +245,41 @@ const AdminLayout: React.FC = () => {
               as={Link}
               to="/big-spin-wheel"
               className={`py-3 ${location.pathname === "/big-spin-wheel"
-                  ? "active bg-primary text-white"
-                  : ""
+                ? "active bg-primary text-white"
+                : ""
                 }`}
             >
               <i className="bi bi-disc me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
-                Big Spin the Wheel
+                Dragon Wheel
+              </span>
+            </LinkNavItem>
+
+            <LinkNavItem
+              as={Link}
+              to="/bonus-season"
+              className={`py-3 ${location.pathname === "/bonus-season"
+                ? "active bg-primary text-white"
+                : ""
+                }`}
+            >
+              <i className="bi bi-calendar-event me-3"></i>
+              <span className={sidebarCollapsed ? "d-none" : ""}>
+                Bonus Season
+              </span>
+            </LinkNavItem>
+
+            <LinkNavItem
+              as={Link}
+              to="/xp-thresholds"
+              className={`py-3 ${location.pathname === "/xp-thresholds"
+                ? "active bg-primary text-white"
+                : ""
+                }`}
+            >
+              <i className="bi bi-sliders me-3"></i>
+              <span className={sidebarCollapsed ? "d-none" : ""}>
+                XP Thresholds
               </span>
             </LinkNavItem>
 

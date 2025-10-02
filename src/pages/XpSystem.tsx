@@ -31,6 +31,7 @@ const XpSystem = () => {
     xpStats,
     xpPagination,
     xpCalculation,
+    xpWeekInfo,
     isLoading: storeLoading,
   } = useAppSelector((state) => state.users as any);
 
@@ -142,6 +143,27 @@ const XpSystem = () => {
           <strong>Maximum Weekly XP:</strong> {xpCalculation?.maxWeeklyXP}
         </p>
       </Alert>
+
+      {/* Week Information Alert */}
+      {xpWeekInfo && (
+        <Alert variant="success" className="mb-4">
+          <h5>📅 Current Week Information</h5>
+          <p>
+            <strong>Week Period:</strong> {xpWeekInfo.weekDescription}
+          </p>
+          <p>
+            <strong>Week Start:</strong> {xpWeekInfo.currentWeekStart} •{" "}
+            <strong>Week End:</strong> {xpWeekInfo.currentWeekEnd}
+          </p>
+          <p className="mb-0">
+            <Badge bg={xpWeekInfo.autoCalculated ? "primary" : "secondary"}>
+              {xpWeekInfo.autoCalculated
+                ? "📊 Auto-calculated Current Week"
+                : "📋 Custom Week Filter Applied"}
+            </Badge>
+          </p>
+        </Alert>
+      )}
 
       <div className="mt-4">
         {/* Statistics Cards */}

@@ -26,6 +26,16 @@ import {
   bigWheelActivate,
   bigWheelDeactivate,
   bigWheelStatus,
+  bonusSeasons,
+  bonusSeasonsById,
+  activeBonusSeason,
+  xpThresholds,
+  xpThresholdsById,
+  xpThresholdsGameTypes,
+  xpThresholdsUserStatus,
+  uploadRewardImage,
+  createXpThreshold,
+  loginRegistrationThresholds,
 } from "./endpoints";
 
 // Define the API requests
@@ -157,9 +167,12 @@ export const postUserExcelUploadRequest = async (file: File) => {
   }
 };
 
-export const getLeaderBoardRequest = async () => {
+export const getLeaderBoardRequest = async (employerCode?: string) => {
   try {
-    const response = await api.get(`${leaderBoard}`);
+    const url = employerCode
+      ? `${leaderBoard}?employerCode=${employerCode}`
+      : leaderBoard;
+    const response = await api.get(url);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;
@@ -171,10 +184,43 @@ export interface XpRecordQuery {
   pageSize?: number;
   location?: string;
   client?: string;
-  week_start_date?: string;
+  week_start_date?: string; // Optional - if not provided, current week will be auto-calculated
 }
 
-export const getXpRecordsRequest = async (query: XpRecordQuery = {}) => {
+export interface XpRecordResponse {
+  success: boolean;
+  data: any[];
+  weekInfo: {
+    currentWeekStart: string;
+    currentWeekEnd: string;
+    autoCalculated: boolean;
+    weekDescription: string;
+  };
+  pagination: {
+    currentPage: number;
+    pageSize: number;
+    totalPages: number;
+    totalRecords: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  xpCalculation: {
+    formula: string;
+    description: string;
+    xpPerDay: number;
+    maxWeeklyXP: number;
+  };
+  statistics: {
+    highestXP: number;
+    lowestXP: number;
+    averageXP: number;
+    totalEmployees: number;
+  };
+}
+
+export const getXpRecordsRequest = async (
+  query: XpRecordQuery = {}
+): Promise<XpRecordResponse> => {
   try {
     const params = new URLSearchParams();
     if (query.page) params.set("page", String(query.page));
@@ -314,6 +360,264 @@ export const deactivateBigWheelRequest = async (data: BigWheelActivate) => {
 export const getBigWheelStatusRequest = async () => {
   try {
     const response = await api.get(bigWheelStatus);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// ===== BONUS SEASON INTERFACES AND REQUESTS =====
+
+export interface BonusSeasonData {
+  id?: number;
+  name: string;
+  employer_code: string;
+  season_type: "easter" | "christmas" | "summer" | "winter" | "custom";
+  duration_months: number;
+  description?: string;
+  start_date: string;
+  end_date: string;
+  bonus_multiplier: number;
+  bonus_type: "percentage" | "fixed_amount";
+  fixed_bonus_amount?: number;
+  is_active: boolean;
+  applies_to_games?: string[];
+  min_xp_threshold?: number;
+  max_participants?: number;
+}
+
+export interface BonusSeasonQuery {
+  page?: number;
+  limit?: number;
+  is_active?: boolean;
+}
+
+// Get all bonus seasons
+export const getBonusSeasonsRequest = async (query: BonusSeasonQuery = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (query.page) params.set("page", String(query.page));
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.is_active !== undefined)
+      params.set("is_active", String(query.is_active));
+
+    const qs = params.toString();
+    const url = qs ? `${bonusSeasons}?${qs}` : bonusSeasons;
+    const response = await api.get(url);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get specific bonus season by ID
+export const getBonusSeasonByIdRequest = async (id: number) => {
+  try {
+    const response = await api.get(`${bonusSeasonsById}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Create new bonus season
+export const createBonusSeasonRequest = async (data: BonusSeasonData) => {
+  try {
+    const response = await api.post(bonusSeasons, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Update bonus season
+export const updateBonusSeasonRequest = async (
+  id: number,
+  data: Partial<BonusSeasonData>
+) => {
+  try {
+    const response = await api.put(`${bonusSeasonsById}/${id}`, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Delete bonus season
+export const deleteBonusSeasonRequest = async (id: number) => {
+  try {
+    const response = await api.delete(`${bonusSeasonsById}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get currently active bonus season
+export const getActiveBonusSeasonRequest = async () => {
+  try {
+    const response = await api.get(activeBonusSeason);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// ===== XP THRESHOLD INTERFACES AND REQUESTS =====
+
+export interface XpThresholdData {
+  id?: number;
+  game_name: string;
+  game_type:
+    | "spin_wheel"
+    | "quiz"
+    | "daily_challenge"
+    | "achievement"
+    | "custom";
+  min_xp_required: number;
+  level_required?: number;
+  is_active: boolean;
+  unlock_message?: string;
+  lock_message?: string;
+  icon_url?: string;
+  sort_order: number;
+  requires_consecutive_days?: number;
+  additional_requirements?: any;
+  reward_on_unlock?: any;
+  cooldown_hours?: number;
+  max_plays_per_day?: number;
+}
+
+export interface XpThresholdQuery {
+  page?: number;
+  limit?: number;
+  game_type?: string;
+  is_active?: boolean;
+}
+
+export interface GameType {
+  value: string;
+  label: string;
+}
+
+// Get all XP thresholds
+export const getXpThresholdsRequest = async (query: XpThresholdQuery = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (query.page) params.set("page", String(query.page));
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.game_type) params.set("game_type", query.game_type);
+    if (query.is_active !== undefined)
+      params.set("is_active", String(query.is_active));
+
+    const qs = params.toString();
+    const url = qs ? `${xpThresholds}?${qs}` : xpThresholds;
+    const response = await api.get(url);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get specific XP threshold by ID
+export const getXpThresholdByIdRequest = async (id: number) => {
+  try {
+    const response = await api.get(`${xpThresholdsById}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Create new XP threshold
+export const createXpThresholdRequest = async (data: XpThresholdData) => {
+  try {
+    const response = await api.post(xpThresholds, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Update XP threshold
+export const updateXpThresholdRequest = async (
+  id: number,
+  data: Partial<XpThresholdData>
+) => {
+  try {
+    const response = await api.put(`${xpThresholdsById}/${id}`, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Delete XP threshold
+export const deleteXpThresholdRequest = async (id: number) => {
+  try {
+    const response = await api.delete(`${xpThresholdsById}/${id}`);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get available game types
+export const getGameTypesRequest = async () => {
+  try {
+    const response = await api.get(xpThresholdsGameTypes);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get user's unlock status for all games
+export const getUserGameStatusRequest = async (userId: number) => {
+  try {
+    const response = await api.get(
+      `${xpThresholdsUserStatus}/${userId}/status`
+    );
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Upload reward image
+export const uploadRewardImageRequest = async (file: File) => {
+  try {
+    const formData = new FormData();
+    formData.append("rewardImage", file);
+
+    const response = await api.post(uploadRewardImage, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Create specific threshold for app login or registration
+export const createSpecificThresholdRequest = async (data: {
+  threshold_type: "app_login" | "new_registration";
+  xp_value: number;
+}) => {
+  try {
+    const response = await api.post(createXpThreshold, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get login and registration thresholds
+export const getLoginRegistrationThresholdsRequest = async () => {
+  try {
+    const response = await api.get(loginRegistrationThresholds);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;

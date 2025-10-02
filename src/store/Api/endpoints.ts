@@ -23,3 +23,18 @@ export const wheelGetConfiguration = "admin/wheel/configuration";
 export const bigWheelActivate = "admin/big-wheel/activate";
 export const bigWheelDeactivate = "admin/big-wheel/deactivate";
 export const bigWheelStatus = "admin/big-wheel/status";
+export const uploadRewardImage = "admin/upload-reward-image";
+
+// Bonus Season endpoints
+export const bonusSeasons = "admin/bonus-seasons";
+export const bonusSeasonsById = "admin/bonus-seasons";
+export const activeBonusSeason = "admin/bonus-seasons/active/current";
+
+// XP Threshold endpoints
+export const xpThresholds = "admin/xp-thresholds";
+export const xpThresholdsById = "admin/xp-thresholds";
+export const xpThresholdsGameTypes = "admin/xp-thresholds/game-types";
+export const xpThresholdsUserStatus = "admin/xp-thresholds/user";
+export const createXpThreshold = "admin/xp-thresholds/create-threshold";
+export const loginRegistrationThresholds =
+  "admin/xp-thresholds/login-registration";

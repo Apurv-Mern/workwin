@@ -1,23 +1,55 @@
-import { useEffect } from "react";
-import { Table, Container, Card } from "react-bootstrap";
+import { useEffect, useState } from "react";
+import { Table, Container, Card, Form, Row, Col } from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
-import { FetchLeaderboard } from "../store/slices/userSlice";
+import { FetchLeaderboard, GetEmployeer } from "../store/slices/userSlice";
 
 const LeaderBoard = () => {
-  const { leaderBoard } = useAppSelector((state) => state.users);
+  const { leaderBoard, employer, isLoading } = useAppSelector((state) => state.users);
   const dispatch = useAppDispatch();
+  const [selectedEmployer, setSelectedEmployer] = useState<string>("");
 
   useEffect(() => {
-    dispatch(FetchLeaderboard());
-  }, []);
+    // Load employers on component mount
+    dispatch(GetEmployeer());
+    // Load all leaderboard initially
+    dispatch(FetchLeaderboard(undefined));
+  }, [dispatch]);
 
-  console.log({ leaderBoard });
+  const handleEmployerChange = (employerCode: string) => {
+    setSelectedEmployer(employerCode);
+    // Fetch leaderboard based on selected employer
+    dispatch(FetchLeaderboard(employerCode || undefined));
+  };
+
+  console.log({ leaderBoard, employer });
 
   return (
     <Container className="py-4">
       <Card className="shadow-sm">
         <Card.Body>
-          <h2 className="mb-4">Leaderboard</h2>
+          <Row className="mb-4">
+            <Col>
+              <h2 className="mb-0">Leaderboard</h2>
+            </Col>
+            <Col md="auto">
+              <Form.Group>
+                <Form.Label>Filter by Employee</Form.Label>
+                <Form.Select
+                  value={selectedEmployer}
+                  onChange={(e) => handleEmployerChange(e.target.value)}
+                  disabled={isLoading}
+                >
+                  <option value="">All Employees</option>
+                  {employer?.map((emp: any) => (
+                    <option key={emp.id} value={emp.employerCode}>
+                      {emp.name} ({emp.employerCode})
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+            </Col>
+          </Row>
+
           <Table striped bordered hover responsive>
             <thead>
               <tr>
@@ -29,15 +61,29 @@ const LeaderBoard = () => {
               </tr>
             </thead>
             <tbody>
-              {leaderBoard?.map((user: any, idx) => (
-                <tr key={user.rank}>
-                  <td>{idx + 1}</td>
-                  <td>{user.name}</td>
-                  <td>{user.email}</td>
-                  <td>{user.totalUserXp}</td>
-                  <td>{user.curr_levels}</td>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-4">
+                    Loading leaderboard...
+                  </td>
                 </tr>
-              ))}
+              ) : leaderBoard?.length > 0 ? (
+                leaderBoard.map((user: any, idx) => (
+                  <tr key={user.id || idx}>
+                    <td>{idx + 1}</td>
+                    <td>{user.name}</td>
+                    <td>{user.email}</td>
+                    <td>{user.totalUserXp?.toLocaleString() || 0}</td>
+                    <td>{user.curr_levels}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="text-center py-4">
+                    No users found in leaderboard
+                  </td>
+                </tr>
+              )}
             </tbody>
           </Table>
         </Card.Body>

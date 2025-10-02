@@ -29,6 +29,7 @@ interface UserState {
   xpPagination: any | null;
   xpStats: any | null;
   xpCalculation: any | null;
+  xpWeekInfo: any | null; // Added for week date information
 }
 
 const initialState: UserState = {
@@ -44,6 +45,7 @@ const initialState: UserState = {
   xpPagination: null,
   xpStats: null,
   xpCalculation: null,
+  xpWeekInfo: null,
 };
 
 export const createUsers = createAsyncThunk(
@@ -151,9 +153,9 @@ export const PostUsersExcelUploadCode = createAsyncThunk(
 );
 export const FetchLeaderboard = createAsyncThunk(
   "users/PostUsersWeightsCode",
-  async (_, { rejectWithValue }) => {
+  async (employerCode: string | undefined, { rejectWithValue }) => {
     try {
-      const response = await getLeaderBoardRequest();
+      const response = await getLeaderBoardRequest(employerCode);
       return response.result;
     } catch (error: any) {
       return rejectWithValue(error.message || "Failed to fetch users");
@@ -311,6 +313,7 @@ const userSlice = createSlice({
         state.xpPagination = action.payload?.pagination || null;
         state.xpStats = action.payload?.statistics || null;
         state.xpCalculation = action.payload?.xpCalculation || null;
+        state.xpWeekInfo = action.payload?.weekInfo || null; // Store week information
       })
       .addCase(FetchXpRecords.rejected, (state, action) => {
         state.isLoading = false;
