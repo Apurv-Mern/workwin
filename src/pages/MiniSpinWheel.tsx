@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   Row,
@@ -6,7 +6,6 @@ import {
   Card,
   Form,
   Button,
-  Alert,
   Spinner,
   Toast,
   ToastContainer,
@@ -57,7 +56,7 @@ const MiniSpinWheel = () => {
 
       // Handle the actual API response structure
       if (response.flag && response.result) {
-        const { numberOfSections, sections, type } = response.result;
+        const { numberOfSections, sections } = response.result;
 
         setWheelSections(numberOfSections);
 

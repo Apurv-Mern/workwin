@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Container,
   Row,
@@ -6,7 +6,6 @@ import {
   Card,
   Form,
   Button,
-  Alert,
   Spinner,
   Toast,
   ToastContainer,
@@ -18,7 +17,6 @@ import { GetEmployeer } from "../store/slices/userSlice";
 import {
   createBonusSeasonRequest,
   getBonusSeasonsRequest,
-  updateBonusSeasonRequest,
   deleteBonusSeasonRequest,
 } from "../store/Api/requests";
 
@@ -148,9 +146,10 @@ const BonusSeason = () => {
     setIsSaving(true);
     try {
       const apiData = {
-        name: `${formData.season_type.charAt(0).toUpperCase() +
+        name: `${
+          formData.season_type.charAt(0).toUpperCase() +
           formData.season_type.slice(1)
-          } Season`,
+        } Season`,
         employer_code: formData.employer_code,
         season_type: formData.season_type as
           | "easter"
