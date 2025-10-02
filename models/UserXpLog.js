@@ -7,6 +7,11 @@ class UserXpLog extends Model {
         type: DataTypes.INTEGER,
         allowNull: false
       },
+      season_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null
+      },
       source: {
         type: DataTypes.ENUM('attribute', 'game', 'manual'),
         allowNull: false

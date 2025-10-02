@@ -8,10 +8,10 @@ class UserLevel extends Model {
         allowNull: false,
         unique: true
       },
-      userId: {
+      season_id: {
         type: DataTypes.INTEGER,
-        allowNull: false,
-        unique: true
+        allowNull: true, // Allow null for global levels not tied to specific seasons
+        defaultValue: null
       },
       totalXp: {
         type: DataTypes.INTEGER,

@@ -45,6 +45,7 @@ const updateLevelAndUserXP = async (userId, newXpToAdd = 0) => {
       //  Insert new level
       await UserLevel.create({
         userId,
+        season_id: null, // Global level not tied to specific season
         level: level.level,
         totalXp,
         xpForNext: next ? next.xpRequired : 0,
@@ -73,7 +74,7 @@ const updateLevelAndUserXP = async (userId, newXpToAdd = 0) => {
     totalUserXp: totalXp,
     curr_levels: currentLevel.level
   });
-  console.log("level_date",{
+  console.log("level_date", {
     level: currentLevel.level,
     totalXp,
     xpForNext,

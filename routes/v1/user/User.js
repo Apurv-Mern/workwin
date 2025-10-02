@@ -4,12 +4,13 @@ const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Season, Rewards, EmployeeXpResults, SpinTheWheel } = ModelsData;
+const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
-// const HelperOpenAi = require("./../../../utils/openAiHelper");
+const xpBadgeSystem = require("./../../../utils/xpBadgeSystem");
+const updateLevelAndUserXP = require('../../../utils/updateLevel');
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = config.get("jwtSecret");
-const { Sequelize } = require('sequelize');
+const { Sequelize, Op } = require('sequelize');
 const userAuthMiddleware = require("../../../middleware/userAuthMiddleware");
 const fs = require("fs/promises");
 const path = require("path");
@@ -20,7 +21,6 @@ const axios = require("axios");
 const FormData = require("form-data");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
-const updateLevelAndUserXP = require('../../../utils/updateLevel');
 // const ExcelJS = require("exceljs");
 
 
@@ -302,91 +302,391 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
     userData.token = token;
-    const season = await HelperUtils.getActiveSeason();
-    //get all seasons list data
-    const GetAllSeasonsData = await Season.findAll();
+
+    // Get user's total XP from EmployeeXpResults or UserLevel
+    let totalUserXp = 0;
+    let currentLevel = 1;
+
+    // First, try to get from EmployeeXpResults (most recent)
+    const empXpResult = await EmployeeXpResults.findOne({
+      where: { emp_code: userDetails.userCode },
+      order: [['week_start_date', 'DESC']]
+    });
+
+    if (empXpResult) {
+      totalUserXp = empXpResult.total_xp || 0;
+      currentLevel = empXpResult.current_level || 1;
+    } else {
+      // Fallback to UserLevel table
+      const userLevel = await UserLevel.findOne({
+        where: { userId: user_id }
+      });
+      if (userLevel) {
+        totalUserXp = userLevel.totalXp || 0;
+        currentLevel = userLevel.level || 1;
+      }
+    }
+
+    // Calculate dynamic level based on XP if needed
+    const calculatedLevel = xpBadgeSystem.calculateLevel(totalUserXp);
+    currentLevel = Math.max(currentLevel, calculatedLevel);
+
+    // Get badge information
+    const badgeProgress = xpBadgeSystem.getBadgeProgress(totalUserXp);
+    const earnedBadges = xpBadgeSystem.getEarnedBadges(totalUserXp);
+
+    // Get unlocked seasons
+    const unlockedSeasons = xpBadgeSystem.getUnlockedSeasons(totalUserXp, currentLevel);
+
+    // Get season information
+    const season = await BonusSeason.getActiveSeason();
+    const GetAllSeasonsData = await BonusSeason.findAll();
+
     userData.seasondata = GetAllSeasonsData.map(entry => {
       let seasonStatus = "";
-      const seasonName = entry?.seasons_name;
+      const seasonName = entry?.name; // Use 'name' from BonusSeason
       const seasonStartDate = entry?.start_date;
       const seasonEndDate = entry?.end_date;
-      const seasonStatusValue = entry?.status;
-      if (seasonStatusValue == 1) {
+      const seasonStatusValue = entry?.is_active; // Use 'is_active' from BonusSeason
+
+      if (seasonStatusValue) {
         seasonStatus = "started";
-      } else if (seasonStatusValue == 2) {
-        seasonStatus = "ended";
-      } else if (seasonStatusValue == 3) {
-        seasonStatus = "completed";
       } else {
-        seasonStatus = "Not Strated";
+        seasonStatus = "Not Started";
       }
+
       return {
+        seasonId: entry.id,
         seasonName,
         seasonStartDate,
         seasonEndDate,
         seasonStatus,
+        isUnlocked: unlockedSeasons.includes(entry.id)
       };
     });
-    // Fetch level badges (with title and progress)
-    const userLevels = await UserLevel.findAll({
-      where: {
-        userId: user_id,
-        season_id: season?.id
-      },
-      include: [
-        {
-          model: LevelDefinition,
-          as: 'LevelDefinition',
-          attributes: ['title']
-        }
-      ],
-      order: [['level', 'ASC']]
-    });
 
-    const currLevel = userDetails.curr_levels || 0;
-    //add all seasons details
+    // Add comprehensive XP and badge information
+    userData.userStats = {
+      totalUserXp,
+      currentLevel,
+      currentBadge: badgeProgress.currentBadge,
+      nextBadge: badgeProgress.nextBadge,
+      badgeProgress: badgeProgress.progress,
+      xpToNextBadge: badgeProgress.xpToNext,
+      isMaxBadgeLevel: badgeProgress.isMaxLevel,
+      earnedBadges: earnedBadges.length,
+      totalBadges: xpBadgeSystem.getAllBadges().length,
+      unlockedSeasons: unlockedSeasons.length,
+      totalSeasons: GetAllSeasonsData.length
+    };
 
-    userData.badges = userLevels.map(entry => {
-      let seasonStatus = "";
-      const badgeLevel = entry.level;
-      const seasonName = season?.seasons_name;
-      const seasonStartDate = season?.start_date;
-      const seasonEndDate = season?.end_date;
-      const seasonStatusValue = season?.status;
-      if (seasonStatusValue == 1) {
-        seasonStatus = "started";
-      } else if (seasonStatusValue == 2) {
-        seasonStatus = "ended";
-      } else if (seasonStatusValue == 3) {
-        seasonStatus = "completed";
-      } else {
-        seasonStatus = "Not Strated";
-      }
-      const progress = parseFloat(entry.progress);
-      let status = "locked";
+    // Keep existing badges structure for backward compatibility
 
-      if (badgeLevel < currLevel) {
-        status = "complete";
-      } else if (badgeLevel === currLevel) {
-        status = progress === 1.0 ? "complete" : "in_progress";
-      }
+    userData.badges = badgeProgress.currentBadge
 
-      return {
-        level: badgeLevel,
-        title: entry.LevelDefinition?.title || `Level ${badgeLevel}`,
-        progress,
-        seasonName,
-        seasonStartDate,
-        seasonEndDate,
-        seasonStatus,
-        status
-      };
-    });
+    // userData.badges = earnedBadges.map((badge, index) => ({
+    //   id: badge.id,
+    //   level: badge.id,
+    //   name: badge.name,
+    //   title: badge.name,
+    //   description: badge.description,
+    //   xpRequired: badge.xpRequired,
+    //   iconUrl: badge.iconUrl,
+    //   status: "complete",
+    //   earnedAt: new Date(), // You might want to track this in the database
+    //   progress: 100
+    // }));
+
+    // Add current progress badge if not at max level
+    // if (!badgeProgress.isMaxLevel && badgeProgress.nextBadge) {
+    //   userData.badges.push({
+    //     id: badgeProgress.nextBadge.id,
+    //     level: badgeProgress.nextBadge.id,
+    //     name: badgeProgress.nextBadge.name,
+    //     title: badgeProgress.nextBadge.name,
+    //     description: badgeProgress.nextBadge.description,
+    //     xpRequired: badgeProgress.nextBadge.xpRequired,
+    //     iconUrl: badgeProgress.nextBadge.iconUrl,
+    //     status: "in_progress",
+    //     progress: badgeProgress.progress
+    //   });
+    // }
 
     res.status(200).send(HelperUtils.successObj("User profile fetched", userData));
   } catch (error) {
     console.error("Error in user /me api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
+  }
+});
+
+// Spin Wheel API - Save wheel rewards/XP
+router.post('/spin-wheel', userAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const user = req.user;
+    const userId = user.userId;
+    const { wheelId, sectionId, rewardType, rewardValue, wheelType } = req.body;
+
+    // Validation
+    if (!wheelId || !sectionId || !rewardType || rewardValue === undefined) {
+      return res.status(400).send(
+        HelperUtils.errorObj("wheelId, sectionId, rewardType, and rewardValue are required")
+      );
+    }
+
+    if (!['xp', 'reward'].includes(rewardType)) {
+      return res.status(400).send(
+        HelperUtils.errorObj("rewardType must be 'xp' or 'reward'")
+      );
+    }
+
+    // Get user details
+    const userDetails = await Users.findByPk(userId);
+    if (!userDetails) {
+      return res.status(404).send(HelperUtils.errorObj("User not found"));
+    }
+
+    const empCode = userDetails.userCode;
+    const currentDate = new Date();
+    const dateOnly = currentDate.toISOString().split('T')[0];
+
+    // Check daily spin limit (optional - you can configure this)
+    const todaySpins = await UserXpLog.count({
+      where: {
+        userId: userId,
+        source: 'game',
+        type: `wheel_spin_${wheelType || 'unknown'}`,
+        date: dateOnly
+      }
+    });
+
+    // Allow up to 3 spins per day (configurable)
+    const MAX_DAILY_SPINS = 3;
+    if (todaySpins >= MAX_DAILY_SPINS) {
+      return res.status(429).send(
+        HelperUtils.errorObj(`Daily spin limit reached. Maximum ${MAX_DAILY_SPINS} spins per day.`)
+      );
+    }
+
+    let xpGained = 0;
+    let description = '';
+
+    if (rewardType === 'xp') {
+      xpGained = parseInt(rewardValue);
+      description = `Wheel Spin: Earned ${xpGained} XP`;
+    } else {
+      // For non-XP rewards, give a small XP bonus for playing
+      xpGained = 50; // Base XP for participating
+      description = `Wheel Spin: Won "${rewardValue}" + ${xpGained} participation XP`;
+    }
+
+    // Apply bonus season multiplier if active
+    const activeBonusSeason = await BonusSeason.findOne({
+      where: {
+        start_date: { [Op.lte]: currentDate },
+        end_date: { [Op.gte]: currentDate }
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    let finalXpGained = xpGained;
+    let bonusMultiplier = 1;
+
+    if (activeBonusSeason) {
+      bonusMultiplier = activeBonusSeason.multiplier || 1;
+      finalXpGained = Math.floor(xpGained * bonusMultiplier);
+      description += ` (${bonusMultiplier}x ${activeBonusSeason.name} bonus)`;
+    }
+
+    // Log the XP gain
+    await UserXpLog.create({
+      userId: userId,
+      season_id: null, // Global game XP
+      source: 'game',
+      type: `wheel_spin_${wheelType || 'mini'}`,
+      xp: finalXpGained,
+      date: dateOnly,
+      description: description
+    }, { transaction });
+
+    // Update or create user level record
+    let userLevel = await UserLevel.findOne({
+      where: { userId: userId }
+    });
+
+    if (!userLevel) {
+      userLevel = await UserLevel.create({
+        userId: userId,
+        season_id: null, // Global level not tied to specific season
+        totalXp: finalXpGained,
+        level: 1,
+        xpForNext: xpBadgeSystem.getXpForNextLevel(1),
+        progress: 0
+      }, { transaction });
+
+      // Update the main users table with new XP and level for new user
+      await userDetails.update({
+        totalUserXp: finalXpGained,
+        curr_levels: 1
+      }, { transaction });
+    } else {
+      const newTotalXp = userLevel.totalXp + finalXpGained;
+      const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
+      const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+      const currentLevelXp = xpBadgeSystem.getXpForNextLevel(newLevel - 1);
+      const progress = newTotalXp >= xpForNext ? 100 : ((newTotalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+
+      await userLevel.update({
+        totalXp: newTotalXp,
+        level: newLevel,
+        xpForNext: xpForNext,
+        progress: Math.min(progress, 100),
+        lastUpdatedAt: currentDate
+      }, { transaction });
+
+      // Update the main users table with new XP and level
+      await userDetails.update({
+        totalUserXp: newTotalXp,
+        curr_levels: newLevel
+      }, { transaction });
+    }
+
+    // Update EmployeeXpResults for attendance system integration
+    const weekStartDate = new Date(currentDate);
+    weekStartDate.setDate(currentDate.getDate() - currentDate.getDay()); // Get Sunday of current week
+
+    let empXpResult = await EmployeeXpResults.findOne({
+      where: {
+        emp_code: empCode,
+        week_start_date: weekStartDate.toISOString().split('T')[0]
+      }
+    });
+
+    if (!empXpResult) {
+      // Create new record for this week
+      empXpResult = await EmployeeXpResults.create({
+        emp_code: empCode,
+        week_start_date: weekStartDate.toISOString().split('T')[0],
+        base_xp: 0,
+        bonus_xp: finalXpGained,
+        penalty_xp: 0,
+        total_xp: finalXpGained,
+        current_level: userLevel.level,
+        current_streak: 0,
+        max_streak: 0,
+        total_days_present: 0,
+        total_hours: 0,
+        perfect_week: false,
+        week_xp_multiplier: bonusMultiplier,
+        created_at: currentDate,
+        updated_at: currentDate
+      }, { transaction });
+    } else {
+      // Update existing record
+      await empXpResult.update({
+        bonus_xp: (empXpResult.bonus_xp || 0) + finalXpGained,
+        total_xp: (empXpResult.total_xp || 0) + finalXpGained,
+        current_level: userLevel.level,
+        week_xp_multiplier: Math.max(empXpResult.week_xp_multiplier || 1, bonusMultiplier),
+        updated_at: currentDate
+      }, { transaction });
+    }
+
+    await transaction.commit();
+
+    // Get updated badge progress
+    const badgeProgress = xpBadgeSystem.getBadgeProgress(userLevel.totalXp);
+    const leveledUp = userLevel.level > (userLevel.level - Math.floor(finalXpGained / 1000));
+
+    // Prepare response
+    const response = {
+      success: true,
+      reward: {
+        type: rewardType,
+        value: rewardValue,
+        xpGained: finalXpGained,
+        originalXp: xpGained,
+        bonusMultiplier: bonusMultiplier,
+        bonusSeasonActive: !!activeBonusSeason
+      },
+      userStats: {
+        totalXp: userLevel.totalXp,
+        level: userLevel.level,
+        leveledUp: leveledUp,
+        currentBadge: badgeProgress.currentBadge,
+        badgeProgress: badgeProgress.progress,
+        xpToNextBadge: badgeProgress.xpToNext
+      },
+      dailySpinsUsed: todaySpins + 1,
+      dailySpinsRemaining: MAX_DAILY_SPINS - (todaySpins + 1)
+    };
+
+    res.status(200).send(
+      HelperUtils.successObj("Wheel spin processed successfully", response)
+    );
+
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error in spin-wheel API:", error);
+    return res.status(500).send(
+      HelperUtils.errorObj("Failed to process wheel spin")
+    );
+  }
+});
+
+// Get XP Badges API
+router.get('/xp-badges', userAuthMiddleware, async (req, res) => {
+  try {
+    const user = req.user;
+    const userId = user.userId;
+
+    // Get user's total XP
+    let totalUserXp = 0;
+
+    const empXpResult = await EmployeeXpResults.findOne({
+      where: { emp_code: (await Users.findByPk(userId)).userCode },
+      order: [['week_start_date', 'DESC']]
+    });
+
+    if (empXpResult) {
+      totalUserXp = empXpResult.total_xp || 0;
+    } else {
+      const userLevel = await UserLevel.findOne({
+        where: { userId: userId }
+      });
+      if (userLevel) {
+        totalUserXp = userLevel.totalXp || 0;
+      }
+    }
+
+    // Get all badge information
+    const allBadges = xpBadgeSystem.getAllBadges();
+    const earnedBadges = xpBadgeSystem.getEarnedBadges(totalUserXp);
+    const badgeProgress = xpBadgeSystem.getBadgeProgress(totalUserXp);
+
+    const response = {
+      totalXp: totalUserXp,
+      currentLevel: xpBadgeSystem.calculateLevel(totalUserXp),
+      allBadges: allBadges,
+      earnedBadges: earnedBadges,
+      currentBadge: badgeProgress.currentBadge,
+      nextBadge: badgeProgress.nextBadge,
+      badgeProgress: badgeProgress.progress,
+      xpToNextBadge: badgeProgress.xpToNext,
+      isMaxLevel: badgeProgress.isMaxLevel
+    };
+
+    res.status(200).send(
+      HelperUtils.successObj("XP badges retrieved successfully", response)
+    );
+  } catch (error) {
+    console.error("Error in xp-badges API:", error);
+    return res.status(500).send(
+      HelperUtils.errorObj("Failed to retrieve XP badges")
+    );
   }
 });
 
@@ -658,7 +958,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
     // get active season name
-    const season = await HelperUtils.getActiveSeason();
+    const season = await BonusSeason.getActiveSeason();
     // Check daily play limit
     const todayPlays = await UserXpLog.count({
       where: {
@@ -834,6 +1134,7 @@ router.get("/rewards", userAuthMiddleware, async (req, res) => {
 router.get("/attendance", userAuthMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
+    const year = req.query.year || new Date().getFullYear();
 
     let empCode = await Users.findOne({
       where: { id: userId },
@@ -845,8 +1146,20 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
       return res.status(401).send(HelperUtils.errorObj("Employee code missing from user session"));
     }
 
+    console.log("Fetching attendance for empCode:", empCode, "and year:", year)
+
+    // Create year-based filter for week_start_date
+    const startOfYear = new Date(year, 0, 1); // January 1st of the year
+    const endOfYear = new Date(year, 11, 31, 23, 59, 59); // December 31st of the year
+
     const attendanceRecords = await EmployeeXpResults.findAll({
-      where: { emp_code: empCode },
+      where: {
+        emp_code: empCode,
+        week_start_date: {
+          [Op.gte]: startOfYear, // Greater than or equal to start of year
+          [Op.lte]: endOfYear    // Less than or equal to end of year
+        }
+      },
       attributes: [
         "id",
         "week_start_date",
@@ -864,7 +1177,6 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
         "thursday_present",
         "friday_present",
         "saturday_present",
-
       ],
       order: [["week_start_date", "DESC"]]
     });
@@ -885,7 +1197,7 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
         multiplier: record.multiplier,
         total_hours: parseFloat(record.total_hours) || 0,
         isSundayPresent: Boolean(record.sunday_present),
-        isMondayPresent: Boolean(record.monday_present),
+        isMondayPresent: Boolean(record.tuesday_present),
         isTuesdayPresent: Boolean(record.tuesday_present),
         isWednesdayPresent: Boolean(record.wednesday_present),
         isThursdayPresent: Boolean(record.thursday_present),
@@ -896,8 +1208,12 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
       return formattedRecord;
     });
 
-
-    res.status(200).send(HelperUtils.successObj("Attendance data fetched successfully", groupedData));
+    res.status(200).send(
+      HelperUtils.successObj(
+        `Attendance data fetched successfully for year ${year}`,
+        groupedData
+      )
+    );
 
   } catch (err) {
     console.error("Error fetching attendance:", err);
@@ -995,27 +1311,83 @@ router.get('/season/dashboard', async (req, res) => {
 
     // Determine spin wheel size based on streak or XP
     let spinWheelType = 'small'; // default
+    let wheelId = 1; // Pixie wheel by default
+
     if (currentStreak >= 28 || totalXP >= 50000) {
       spinWheelType = 'big';
+      wheelId = 2; // Dragon wheel
     } else if (currentStreak >= 14 || totalXP >= 25000) {
-      spinWheelType = 'medium';
+      spinWheelType = 'small';
+      wheelId = 1; // Still Pixie but medium size
     }
 
-    // Get spin wheel configuration
+    // Get spin wheel configuration based on wheel type
     const wheelConfig = await SpinTheWheel.findOne({
       where: {
+        id: wheelId,
         is_active: true
       },
-      attributes: ['number_of_sections', 'sections', 'total_xp_pool']
+      attributes: ['id', 'number_of_sections', 'sections', 'total_xp_pool', 'reward_images', 'type']
     });
+
 
     let spinWheelContents = null;
     if (wheelConfig) {
       const storedSections = JSON.parse(wheelConfig.sections);
+      const rewardImages = wheelConfig.reward_images || [];
+      const wheelType = wheelConfig.type || 'mixed';
+
+      // Ensure rewardImages is an array
+      if (typeof rewardImages === 'string') {
+        try {
+          rewardImages = JSON.parse(rewardImages);
+        } catch (error) {
+          console.error("Error parsing reward_images string:", error);
+          rewardImages = [];
+        }
+      }
+
+      // If it's still not an array, make it an empty array
+      if (!Array.isArray(rewardImages)) {
+        console.warn("reward_images is not an array, converting to empty array");
+        rewardImages = [];
+      }
+
+      const processImagePath = (imagePath) => {
+        if (!imagePath || imagePath.trim() === '') {
+          return null;
+        }
+        console.log("Processing image path:", imagePath);
+        return imagePath.startsWith('http')
+          ? imagePath
+          : `https://localhost:3008${imagePath}`;
+      };
+
+
+      // Transform xpValues array into individual objects with additional properties
+      const wheelSections = storedSections.map((section, index) => {
+        // Determine if this section is XP or Reward based on xpValue type
+        const isRewardSection = typeof section.xpValue === 'string';
+        const sectionImagePath = rewardImages[index] || null;
+
+        return {
+          id: index + 1,
+          sectionNumber: section.sectionNumber || index + 1,
+          xpValue: section.xpValue,
+          image: processImagePath(sectionImagePath),
+          probability: calculateSectionProbability(wheelConfig.number_of_sections, index),
+          isActive: true,
+        };
+      });
+
       spinWheelContents = {
+        wheelId: wheelConfig.id,
+        wheelType: wheelConfig.wheel_type || spinWheelType,
         sections: wheelConfig.number_of_sections,
-        xpValues: storedSections.map(section => section.xpValue),
-        totalXP: wheelConfig.total_xp_pool
+        totalXP: wheelConfig.total_xp_pool,
+        wheelSections: wheelSections, // New enhanced structure
+        // Keep legacy xpValues for backward compatibility
+        // xpValues: storedSections.map(section => section.xpValue)
       };
     }
 
@@ -1024,18 +1396,18 @@ router.get('/season/dashboard', async (req, res) => {
     const unlockedMiniGames = allMiniGames.slice(0, currentWeekNumber);
 
     // Unlock seasons based on current month (0-based)
-    // For currentMonth = 9 (September), this gives [0,1,2,3,4,5,6,7,8]
     const allSeasonsArray = Array.from({ length: 12 }, (_, i) => i);
     const seasonUnlocked = allSeasonsArray.slice(0, currentMonth);
-    // Calculate season bonus XP multiplier based on week within month
-    let bonusSeasonDisplay = 1; // Default multiplier
-    if (currentWeekNumber === 1) {
-      bonusSeasonDisplay = 3; // First week of month bonus
-    } else if (currentWeekNumber === 2) {
-      bonusSeasonDisplay = 2; // Second week bonus
-    } else if (currentWeekNumber >= totalWeeksInSeason - 1) {
-      bonusSeasonDisplay = 4; // Last week of month rush bonus
-    }
+
+    // // Calculate season bonus XP multiplier based on week within month
+    // let bonusSeasonDisplay = 1; // Default multiplier
+    // if (currentWeekNumber === 1) {
+    //   bonusSeasonDisplay = 3; // First week of month bonus
+    // } else if (currentWeekNumber === 2) {
+    //   bonusSeasonDisplay = 2; // Second week bonus
+    // } else if (currentWeekNumber >= totalWeeksInSeason - 1) {
+    //   bonusSeasonDisplay = 4; // Last week of month rush bonus
+    // }
 
     // Get month name for season display
     const monthNames = [
@@ -1044,26 +1416,60 @@ router.get('/season/dashboard', async (req, res) => {
     ];
     const currentSeasonName = `${monthNames[currentMonth - 1]} ${currentYear}`;
 
-    // Add seasonal context to mascot tip
-    if (currentWeekNumber === 1) {
-      mascotWeeklyTip = seasonalMessages[currentMonth];
+    // Check for active bonus season
+    let bonusSeasonInfo = {
+      bonusSeason: 0, // Default: no bonus season active
+      name: null,
+      startDate: null,
+      endDate: null,
+      multiplier: null,
+      durationMonths: null
+    };
+
+    const activeBonusSeason = await BonusSeason.findOne({
+      where: {
+        start_date: {
+          [Op.lte]: currentDate
+        },
+        end_date: {
+          [Op.gte]: currentDate
+        }
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (activeBonusSeason) {
+      bonusSeasonInfo = {
+        bonusSeason: 1,
+        name: activeBonusSeason.name,
+        startDate: activeBonusSeason.start_date,
+        endDate: activeBonusSeason.end_date,
+        multiplier: activeBonusSeason.multiplier,
+        durationMonths: activeBonusSeason.duration_months
+      };
     }
 
     // Prepare response
     const seasonDashboard = {
-      // Core season info - Updated structure
+      // Core season info
       noOfWeeksInCurrentSeason: totalWeeksInSeason,
       currentSeason: currentSeason, // 1-12 (month number)
       currentWeek: currentWeekNumber, // 1-5 (week within month)
 
-      // Spin wheel info
+      // Enhanced spin wheel info
       spinTheWheelType: spinWheelType, // 'small', 'medium', 'big'
       spinTheWheelContents: spinWheelContents,
 
       // Games and bonuses
       miniGamesUnlocked: unlockedMiniGames,
       seasonUnlocked,
-      bonusSeasonDisplay,
+
+      // Bonus season information
+      isBonusSeasonActive: !!activeBonusSeason,
+      bonusSeason: {
+        ...bonusSeasonInfo,
+
+      },
 
       // Additional user context
       userStats: {
@@ -1075,7 +1481,7 @@ router.get('/season/dashboard', async (req, res) => {
         monthProgress: Math.round((currentDay / seasonEndDate.getDate()) * 100)
       },
 
-      // Season metadata - Updated with month-based seasons
+      // Season metadata
       seasonInfo: {
         name: currentSeasonName,
         seasonNumber: currentSeason,
@@ -1085,16 +1491,7 @@ router.get('/season/dashboard', async (req, res) => {
         daysInSeason: seasonEndDate.getDate(),
         currentDay: currentDay,
         isActive: true
-      },
-
-      // All 12 seasons info for reference
-      // allSeasons: monthNames.map((month, index) => ({
-      //   seasonNumber: index + 1,
-      //   monthName: month,
-      //   isActive: index + 1 === currentSeason,
-      //   startDate: new Date(currentYear, index, 1).toISOString().split('T')[0],
-      //   endDate: new Date(currentYear, index + 1, 0).toISOString().split('T')[0]
-      // }))
+      }
     };
 
     res.status(200).send(
@@ -1108,6 +1505,37 @@ router.get('/season/dashboard', async (req, res) => {
     );
   }
 });
+
+// Helper function to calculate section probability
+const calculateSectionProbability = (totalSections, sectionIndex) => {
+  // Equal probability for all sections by default
+  const baseProbability = 1 / totalSections;
+
+  // You can customize probability based on section index or value
+  // For example, higher XP sections might have lower probability
+  let probabilityMultiplier = 1;
+
+  // Example: Reduce probability for high-value sections
+  if (sectionIndex >= totalSections * 0.75) { // Last 25% of sections
+    probabilityMultiplier = 0.5; // 50% less likely
+  } else if (sectionIndex >= totalSections * 0.5) { // Middle 25% of sections
+    probabilityMultiplier = 0.8; // 20% less likely
+  }
+
+  return parseFloat((baseProbability * probabilityMultiplier).toFixed(6));
+};
+
+// Helper function to get section color for UI
+// const getSectionColor = (index) => {
+//   const colors = [
+//     '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+//     '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+//     '#F8C471', '#82E0AA'
+//   ];
+
+//   return colors[index % colors.length];
+// };
+
 
 module.exports = router;
 

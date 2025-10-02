@@ -13,9 +13,14 @@ const {
   Weights,
   Rewards,
   EmployeeXpResults,
-  SpinTheWheel
+  SpinTheWheel,
+  BonusSeason,
+  XpThreshold,
+  UserLevel,
+  UserXpLog
 } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
+const xpBadgeSystem = require("./../../../utils/xpBadgeSystem");
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = config.get("jwtSecret");
 const adminAuthMiddleware = require("../../../middleware/adminAuthMiddleware");
@@ -769,6 +774,7 @@ router.post("/xp/calculate-daily", adminAuthMiddleware, async (req, res) => {
 
       await UserXpLog.create({
         userId: attr.userId,
+        season_id: null, // Global XP not tied to specific season
         source: "attribute",
         type: "daily_xp",
         xp,
@@ -1296,7 +1302,16 @@ router.delete("/rewards/:id", adminAuthMiddleware, async (req, res) => {
 
 router.get("/leaderboard", adminAuthMiddleware, async (req, res) => {
   try {
+    const { employerCode } = req.query;
+
+    // Build the where condition
+    let whereCondition = {};
+    if (employerCode) {
+      whereCondition.userCode = employerCode;
+    }
+
     const leaderboardUsers = await Users.findAll({
+      where: whereCondition,
       include: [
         {
           model: Roles,
@@ -1306,7 +1321,7 @@ router.get("/leaderboard", adminAuthMiddleware, async (req, res) => {
           attributes: [], // ✅ Do not return Roles in result
         },
       ],
-      attributes: ["id", "name", "email", "curr_levels", "totalUserXp"],
+      attributes: ["id", "name", "email", "userCode", "curr_levels", "totalUserXp"],
       order: [["totalUserXp", "DESC"]],
       // limit: 10
     });
@@ -1412,327 +1427,6 @@ router.get(
 );
 
 // Upload Excel File
-// router.post("/users/excel-upload", upload.single("file"), async (req, res) => {
-//   const transaction = await sequelize.transaction();
-
-//   try {
-//     if (!req.file) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "No file uploaded" });
-//     }
-
-//     const filePath = req.file.path;
-//     const workbook = XLSX.readFile(filePath);
-//     const sheetName = workbook.SheetNames[0];
-//     const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-//     const hasValue = (value) => {
-//       return value !== null && value !== undefined && value !== "";
-//     };
-
-//     // Season bonus configuration
-//     const SEASON_BONUS_CONFIG = {
-//       milestones: [
-//         { weeks: 4, bonus: 250 },   // 4 weeks continuous = 250 XP
-//         { weeks: 8, bonus: 500 },   // 8 weeks continuous = 500 XP  
-//         { weeks: 12, bonus: 750 },  // 12 weeks continuous = 750 XP
-//         { weeks: 16, bonus: 1000 }, // 16 weeks continuous = 1000 XP
-//         { weeks: 20, bonus: 1000 }  // 20 weeks continuous = 1000 XP (5-week season bonus)
-//       ]
-//     };
-
-//     // Function to calculate season bonus XP
-//     const calculateSeasonBonus = (currentStreak, existingMilestones = []) => {
-//       let newBonusXP = 0;
-//       let newMilestones = [...existingMilestones];
-
-//       // Calculate how many weeks the current streak represents
-//       const streakWeeks = Math.floor(currentStreak / 7); // Assuming 7-day streaks = 1 week
-
-//       for (const milestone of SEASON_BONUS_CONFIG.milestones) {
-//         if (streakWeeks >= milestone.weeks && !newMilestones.includes(milestone.weeks)) {
-//           newBonusXP += milestone.bonus;
-//           newMilestones.push(milestone.weeks);
-//         }
-//       }
-
-//       return {
-//         bonusXP: newBonusXP,
-//         milestones: newMilestones
-//       };
-//     };
-
-//     // Updated XP calculation with refined penalty logic
-//     const calculateXP = (employeeData, multiplier = 1) => {
-//       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-//       const xpPerDay = 2500;
-//       const penaltyXP = -1000;
-//       let baseXP = 0;
-//       let attendanceDetails = {};
-//       let perfectAttendance = true;
-
-//       days.forEach((day) => {
-//         const inTime = employeeData[`${day}_In`];
-//         const outTime = employeeData[`${day}_Out`];
-
-//         if (hasValue(inTime) && hasValue(outTime)) {
-//           baseXP += xpPerDay;
-//           attendanceDetails[day.toLowerCase()] = {
-//             present: true,
-//             hours: employeeData[`${day}_Hours`] || 0
-//           };
-//         } else {
-//           attendanceDetails[day.toLowerCase()] = {
-//             present: false,
-//             hours: 0
-//           };
-//           perfectAttendance = false;
-//         }
-//       });
-
-//       // Apply multiplier to base XP
-//       let totalXP = baseXP * multiplier;
-
-//       // Apply penalty ONLY if: not perfect attendance and has base XP
-//       let penaltyApplied = 0;
-//       if (!perfectAttendance && baseXP > 0) {
-//         totalXP += penaltyXP;
-//         penaltyApplied = penaltyXP;
-//       }
-
-//       // Ensure XP cannot be negative
-//       if (totalXP < 0) {
-//         totalXP = 0;
-//       }
-
-//       return {
-//         baseXP,
-//         totalXP,
-//         attendanceDetails,
-//         perfectAttendance,
-//         penaltyApplied,
-//         multiplierUsed: multiplier
-//       };
-//     };
-
-//     // Function to calculate streak within a week
-//     const calculateCurrentWeekStreak = (attendanceDetails) => {
-//       const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-//       let maxStreak = 0;
-//       let currentStreak = 0;
-
-//       for (const day of daysOrder) {
-//         if (attendanceDetails[day] && attendanceDetails[day].present) {
-//           currentStreak += 1;
-//           maxStreak = Math.max(maxStreak, currentStreak);
-//         } else {
-//           currentStreak = 0;
-//         }
-//       }
-
-//       return maxStreak;
-//     };
-
-//     // Function to calculate overall streak (considering previous weeks)
-//     const calculateOverallStreak = async (empCode, currentWeekAttendance, transaction) => {
-//       const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
-
-//       // Get the most recent record for this employee
-//       const latestRecord = await EmployeeXpResults.findOne({
-//         where: { emp_code: empCode },
-//         order: [["upload_date", "DESC"]],
-//         transaction
-//       });
-
-//       if (!latestRecord) {
-//         return {
-//           currentStreak: currentWeekStreak,
-//           maxStreak: currentWeekStreak
-//         };
-//       }
-
-//       const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
-//       let lastDayPresent = false;
-
-//       for (const day of previousDaysOrder) {
-//         const dayPresent = latestRecord[`${day}_present`];
-//         if (dayPresent !== null) {
-//           lastDayPresent = dayPresent;
-//           break;
-//         }
-//       }
-
-//       let newCurrentStreak;
-//       if (lastDayPresent && currentWeekAttendance.sun.present) {
-//         newCurrentStreak = latestRecord.current_streak + currentWeekStreak;
-//       } else if (currentWeekStreak > 0) {
-//         newCurrentStreak = currentWeekStreak;
-//       } else {
-//         newCurrentStreak = 0;
-//       }
-
-//       const newMaxStreak = Math.max(latestRecord.max_streak, newCurrentStreak);
-
-//       return {
-//         currentStreak: newCurrentStreak,
-//         maxStreak: newMaxStreak
-//       };
-//     };
-
-//     const weekStartDate = req.body.weekStartDate || null;
-//     const weekEndDate = req.body.weekEndDate || null;
-//     const uploadedBy = req.user?.id || null;
-
-//     const processedEmployees = [];
-
-//     for (const row of rawData.filter(r => r.Person)) {
-//       const empCode = row.EmployeeCode || row.emp_code;
-//       const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
-
-//       // Get the latest record to check for existing data and multiplier
-//       const latestRecord = await EmployeeXpResults.findOne({
-//         where: { emp_code: empCode },
-//         order: [["upload_date", "DESC"]],
-//         transaction
-//       });
-
-//       // Get multiplier from latest record or default to 1
-//       const currentMultiplier = latestRecord ? latestRecord.multiplier : 1;
-
-//       // Calculate XP with current multiplier
-//       const xpCalculation = calculateXP(row, currentMultiplier);
-
-//       // Calculate streak
-//       const streakData = await calculateOverallStreak(empCode, xpCalculation.attendanceDetails, transaction);
-
-//       // Calculate season bonus XP based on new streak
-//       const existingMilestones = latestRecord ? latestRecord.season_streak_milestones || [] : [];
-//       const seasonBonus = calculateSeasonBonus(streakData.currentStreak, existingMilestones);
-
-//       // Calculate cumulative XP (sum of all previous weeks + current week)
-//       const allPreviousRecords = await EmployeeXpResults.findAll({
-//         where: { emp_code: empCode },
-//         attributes: ['total_xp'],
-//         transaction
-//       });
-
-//       const previousTotalXP = allPreviousRecords.reduce((sum, record) => sum + record.total_xp, 0);
-//       const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
-//       const cumulativeXP = previousTotalXP + weeklyXP;
-
-//       // Always CREATE a new record (no updates to maintain history)
-//       await EmployeeXpResults.create({
-//         person_id: parseInt(row.Person),
-//         firstname: row.Firstname,
-//         surname: row.Surname,
-//         full_name: fullName,
-//         emp_code: empCode,
-//         email: row.Email,
-//         location: row.locationName,
-//         client: row.ClientName,
-//         total_xp: cumulativeXP, // This now represents cumulative XP across all weeks
-//         season_bonus_xp: seasonBonus.bonusXP,
-//         season_streak_milestones: seasonBonus.milestones,
-
-//         // Set multiplier from latest record or default
-//         multiplier: currentMultiplier,
-
-//         current_streak: streakData.currentStreak,
-//         max_streak: streakData.maxStreak,
-
-//         total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
-//         total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
-
-//         // Daily attendance flags for current week
-//         sunday_present: xpCalculation.attendanceDetails.sun.present,
-//         monday_present: xpCalculation.attendanceDetails.mon.present,
-//         tuesday_present: xpCalculation.attendanceDetails.tue.present,
-//         wednesday_present: xpCalculation.attendanceDetails.wed.present,
-//         thursday_present: xpCalculation.attendanceDetails.thu.present,
-//         friday_present: xpCalculation.attendanceDetails.fri.present,
-//         saturday_present: xpCalculation.attendanceDetails.sat.present,
-
-//         // Daily hours for current week
-//         sunday_hours: xpCalculation.attendanceDetails.sun.hours,
-//         monday_hours: xpCalculation.attendanceDetails.mon.hours,
-//         tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
-//         wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
-//         thursday_hours: xpCalculation.attendanceDetails.thu.hours,
-//         friday_hours: xpCalculation.attendanceDetails.fri.hours,
-//         saturday_hours: xpCalculation.attendanceDetails.sat.hours,
-
-//         upload_date: new Date(),
-//         week_start_date: weekStartDate,
-//         week_end_date: weekEndDate,
-//         uploaded_by: uploadedBy
-//       }, { transaction });
-
-//       processedEmployees.push({
-//         emp_code: empCode,
-//         name: fullName,
-//         weekly_xp: xpCalculation.totalXP, // XP earned this week only
-//         season_bonus_earned: seasonBonus.bonusXP,
-//         cumulative_xp: cumulativeXP, // Total XP across all weeks
-//         current_streak: streakData.currentStreak,
-//         max_streak: streakData.maxStreak,
-//         weekly_attendance: {
-//           sunday: xpCalculation.attendanceDetails.sun.present,
-//           monday: xpCalculation.attendanceDetails.mon.present,
-//           tuesday: xpCalculation.attendanceDetails.tue.present,
-//           wednesday: xpCalculation.attendanceDetails.wed.present,
-//           thursday: xpCalculation.attendanceDetails.thu.present,
-//           friday: xpCalculation.attendanceDetails.fri.present,
-//           saturday: xpCalculation.attendanceDetails.sat.present,
-//           days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length
-//         },
-//         milestones_achieved: seasonBonus.milestones.filter(m => !existingMilestones.includes(m))
-//       });
-//     }
-
-//     await transaction.commit();
-
-//     // Calculate statistics including season bonus
-//     const totalSeasonBonus = processedEmployees.reduce((sum, emp) => sum + emp.season_bonus_earned, 0);
-//     const totalWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp, 0);
-//     const employeesWithNewMilestones = processedEmployees.filter(emp => emp.milestones_achieved.length > 0);
-
-//     res.status(200).json({
-//       success: true,
-//       message: "New week data created successfully with history maintained",
-//       totalEmployees: processedEmployees.length,
-//       weekSummary: {
-//         totalWeeklyXPAwarded: totalWeeklyXP,
-//         totalSeasonBonusAwarded: totalSeasonBonus,
-//         employeesWithNewMilestones: employeesWithNewMilestones.length,
-//         weekStartDate: weekStartDate,
-//         weekEndDate: weekEndDate
-//       },
-//       seasonBonusSystem: {
-//         milestoneBreakdown: SEASON_BONUS_CONFIG.milestones
-//       },
-//       xpCalculation: {
-//         formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Season Bonus >= 0",
-//         description: "Each week creates a new record. Cumulative XP is calculated by summing all previous weeks plus current week XP.",
-//         xpPerDay: 2500,
-//         penaltyPerWeek: -1000,
-//         defaultMultiplier: 1
-//       },
-//       processedEmployees: processedEmployees
-//     });
-
-//   } catch (err) {
-//     if (transaction && !transaction.finished) {
-//       await transaction.rollback();
-//     }
-//     console.error("Error:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to process Excel file and save to database",
-//       error: err.message
-//     });
-//   }
-// });
 router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), async (req, res) => {
   const transaction = await sequelize.transaction();
 
@@ -1923,9 +1617,175 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       };
     };
 
+    // Function to update user level and badges based on new XP
+    const updateUserLevelAndBadges = async (empCode, newTotalXp, transaction) => {
+      try {
+        // Find the user by employee code
+        const user = await Users.findOne({
+          where: { userCode: empCode },
+          transaction
+        });
+
+        if (!user) {
+          console.warn(`User not found for employee code: ${empCode}`);
+          return {
+            updated: false,
+            reason: 'User not found'
+          };
+        }
+
+        // Calculate new level based on total XP
+        const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
+        const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+        const currentLevelXp = newLevel > 1 ? xpBadgeSystem.getXpForNextLevel(newLevel - 1) : 0;
+        const progress = newTotalXp >= xpForNext ? 100 : ((newTotalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+
+        // Get badge progress
+        const badgeProgress = xpBadgeSystem.getBadgeProgress(newTotalXp);
+        const earnedBadges = xpBadgeSystem.getEarnedBadges(newTotalXp);
+
+        // Update or create UserLevel record
+        const [userLevel, created] = await UserLevel.findOrCreate({
+          where: { userId: user.id },
+          defaults: {
+            userId: user.id,
+            season_id: null, // Global level not tied to specific season
+            totalXp: newTotalXp,
+            level: newLevel,
+            xpForNext: xpForNext,
+            progress: Math.min(progress, 100),
+            lastUpdatedAt: new Date()
+          },
+          transaction
+        });
+
+        if (!created) {
+          // Update existing record
+          const oldLevel = userLevel.level;
+          const leveledUp = newLevel > oldLevel;
+
+          await userLevel.update({
+            totalXp: newTotalXp,
+            level: newLevel,
+            xpForNext: xpForNext,
+            progress: Math.min(progress, 100),
+            lastUpdatedAt: new Date()
+          }, { transaction });
+
+          // Update the main users table with new XP and level
+          await user.update({
+            totalUserXp: newTotalXp,
+            curr_levels: newLevel
+          }, { transaction });
+
+          return {
+            updated: true,
+            userId: user.id,
+            empCode: empCode,
+            oldLevel: oldLevel,
+            newLevel: newLevel,
+            leveledUp: leveledUp,
+            totalXp: newTotalXp,
+            currentBadge: badgeProgress.currentBadge,
+            earnedBadges: earnedBadges.length,
+            badgeProgress: badgeProgress.progress,
+            xpToNextBadge: badgeProgress.xpToNext
+          };
+        } else {
+          // Update the main users table with new XP and level for new user
+          await user.update({
+            totalUserXp: newTotalXp,
+            curr_levels: newLevel
+          }, { transaction });
+
+          return {
+            updated: true,
+            userId: user.id,
+            empCode: empCode,
+            oldLevel: 0,
+            newLevel: newLevel,
+            leveledUp: true,
+            totalXp: newTotalXp,
+            currentBadge: badgeProgress.currentBadge,
+            earnedBadges: earnedBadges.length,
+            badgeProgress: badgeProgress.progress,
+            xpToNextBadge: badgeProgress.xpToNext,
+            isNewUser: true
+          };
+        }
+      } catch (error) {
+        console.error(`Error updating user level for ${empCode}:`, error);
+        return {
+          updated: false,
+          reason: error.message
+        };
+      }
+    };
+
+    // Function to log XP gain for attendance
+    const logAttendanceXp = async (empCode, weeklyXp, seasonBonusXp, weekStartDate, description, transaction) => {
+      try {
+        const user = await Users.findOne({
+          where: { userCode: empCode },
+          transaction
+        });
+
+        if (!user) return;
+
+        // Log base attendance XP
+        if (weeklyXp > 0) {
+          await UserXpLog.create({
+            userId: user.id,
+            season_id: null, // Global attendance XP
+            source: 'attribute',
+            type: 'weekly_attendance',
+            xp: weeklyXp,
+            date: weekStartDate || new Date().toISOString().split('T')[0],
+            description: description || `Weekly attendance XP for week starting ${weekStartDate}`
+          }, { transaction });
+        }
+
+        // Log season bonus XP separately if applicable
+        if (seasonBonusXp > 0) {
+          await UserXpLog.create({
+            userId: user.id,
+            season_id: null, // Global season bonus XP
+            source: 'attribute',
+            type: 'season_bonus',
+            xp: seasonBonusXp,
+            date: weekStartDate || new Date().toISOString().split('T')[0],
+            description: `Season bonus XP: ${seasonBonusXp} points for consecutive perfect weeks`
+          }, { transaction });
+        }
+      } catch (error) {
+        console.error(`Error logging XP for ${empCode}:`, error);
+      }
+    };
+
     const weekStartDate = req.body.weekStartDate || null;
     const weekEndDate = req.body.weekEndDate || null;
     const uploadedBy = req.user?.id || null;
+
+    // Auto-calculate week dates if not provided
+    let calculatedWeekStart = weekStartDate;
+    let calculatedWeekEnd = weekEndDate;
+
+    if (!weekStartDate || !weekEndDate) {
+      const currentDate = new Date();
+
+      // Calculate current week start (Sunday) and end (Saturday)
+      const autoWeekStart = new Date(currentDate);
+      autoWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
+      autoWeekStart.setHours(0, 0, 0, 0);
+
+      const autoWeekEnd = new Date(autoWeekStart);
+      autoWeekEnd.setDate(autoWeekStart.getDate() + 6); // Set to Saturday
+      autoWeekEnd.setHours(23, 59, 59, 999);
+
+      // Use auto-calculated dates if not provided
+      calculatedWeekStart = calculatedWeekStart || autoWeekStart.toISOString().split('T')[0];
+      calculatedWeekEnd = calculatedWeekEnd || autoWeekEnd.toISOString().split('T')[0];
+    }
 
     const processedEmployees = [];
 
@@ -1966,6 +1826,19 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
       const cumulativeXP = previousTotalXP + weeklyXP;
 
+      // Update user level and badges with new cumulative XP
+      const userLevelUpdate = await updateUserLevelAndBadges(empCode, cumulativeXP, transaction);
+
+      // Log XP gains to UserXpLog
+      await logAttendanceXp(
+        empCode,
+        xpCalculation.totalXP,
+        seasonBonus.bonusXP,
+        calculatedWeekStart,
+        `Weekly attendance: ${Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length}/7 days present`,
+        transaction
+      );
+
       // Always CREATE a new record (no updates to maintain history)
       await EmployeeXpResults.create({
         person_id: parseInt(row.Person),
@@ -1979,6 +1852,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         total_xp: cumulativeXP, // This now represents cumulative XP across all weeks
         season_bonus_xp: seasonBonus.bonusXP,
         season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
+        current_level: userLevelUpdate.updated ? userLevelUpdate.newLevel : 1, // Include calculated level
 
         // Set multiplier from latest record or default
         multiplier: currentMultiplier,
@@ -2008,8 +1882,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         saturday_hours: xpCalculation.attendanceDetails.sat.hours,
 
         upload_date: new Date(),
-        week_start_date: weekStartDate,
-        week_end_date: weekEndDate,
+        week_start_date: calculatedWeekStart,
+        week_end_date: calculatedWeekEnd,
         uploaded_by: uploadedBy
       }, { transaction });
 
@@ -2023,6 +1897,17 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         cumulative_xp: cumulativeXP, // Total XP across all weeks
         current_streak: streakData.currentStreak,
         max_streak: streakData.maxStreak,
+        // Badge and Level Information
+        level_update: userLevelUpdate.updated ? {
+          old_level: userLevelUpdate.oldLevel,
+          new_level: userLevelUpdate.newLevel,
+          leveled_up: userLevelUpdate.leveledUp,
+          current_badge: userLevelUpdate.currentBadge,
+          earned_badges: userLevelUpdate.earnedBadges,
+          badge_progress: userLevelUpdate.badgeProgress,
+          xp_to_next_badge: userLevelUpdate.xpToNextBadge,
+          is_new_user: userLevelUpdate.isNewUser || false
+        } : null,
         weekly_attendance: {
           sunday: xpCalculation.attendanceDetails.sun.present,
           monday: xpCalculation.attendanceDetails.mon.present,
@@ -2044,17 +1929,42 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     const employeesWithPerfectWeek = processedEmployees.filter(emp => emp.current_week_perfect).length;
     const employeesWithSeasonBonus = processedEmployees.filter(emp => emp.season_bonus_earned > 0).length;
 
+    // Badge and Level Statistics
+    const employeesWhoLeveledUp = processedEmployees.filter(emp => emp.level_update?.leveled_up).length;
+    const totalNewLevels = processedEmployees.reduce((sum, emp) => {
+      if (emp.level_update?.leveled_up) {
+        return sum + (emp.level_update.new_level - emp.level_update.old_level);
+      }
+      return sum;
+    }, 0);
+    const averageLevel = processedEmployees.reduce((sum, emp) => {
+      return sum + (emp.level_update?.new_level || 1);
+    }, 0) / processedEmployees.length;
+    const highestLevel = Math.max(...processedEmployees.map(emp => emp.level_update?.new_level || 1));
+    const employeesWithBadgeProgress = processedEmployees.filter(emp =>
+      emp.level_update?.badge_progress > 0
+    ).length;
+
     res.status(200).json({
       success: true,
-      message: "New week data created successfully with consecutive perfect week bonuses",
+      message: "Attendance processed with automatic XP, level, and badge updates",
       totalEmployees: processedEmployees.length,
       weekSummary: {
         totalWeeklyXPAwarded: totalWeeklyXP,
         totalSeasonBonusAwarded: totalSeasonBonus,
         employeesWithPerfectWeek: employeesWithPerfectWeek,
         employeesWithSeasonBonus: employeesWithSeasonBonus,
-        weekStartDate: weekStartDate,
-        weekEndDate: weekEndDate
+        weekStartDate: calculatedWeekStart,
+        weekEndDate: calculatedWeekEnd,
+        datesAutoCalculated: !weekStartDate || !weekEndDate
+      },
+      badgeAndLevelSummary: {
+        employeesWhoLeveledUp: employeesWhoLeveledUp,
+        totalNewLevels: totalNewLevels,
+        averageLevel: Math.round(averageLevel * 100) / 100,
+        highestLevel: highestLevel,
+        employeesWithBadgeProgress: employeesWithBadgeProgress,
+        badgeSystemActive: true
       },
       seasonBonusSystem: {
         description: "Bonus XP awarded for consecutive perfect weeks (7 days each). Resets when any day is missed.",
@@ -2068,9 +1978,25 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           "Missing any day resets the consecutive count"
         ]
       },
+      xpBadgeSystem: {
+        description: "Dynamic badge system with 10 progressive badges based on total XP",
+        badges: xpBadgeSystem.getAllBadges().map(badge => ({
+          name: badge.name,
+          xpRequired: badge.xpRequired,
+          description: badge.description
+        })),
+        levelFormula: "Level = floor(sqrt(totalXP / 1000)) + 1",
+        features: [
+          "Automatic level calculation based on total XP",
+          "Progressive badge unlocking system",
+          "Real-time progress tracking",
+          "Season unlock requirements",
+          "Integration with /me API for user profiles"
+        ]
+      },
       xpCalculation: {
         formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Perfect Week Bonus >= 0",
-        description: "Each week creates a new record. Perfect week bonus increases with consecutive perfect weeks.",
+        description: "Each week creates a new record. Perfect week bonus increases with consecutive perfect weeks. Levels and badges update automatically.",
         xpPerDay: 2500,
         penaltyPerWeek: -1000,
         defaultMultiplier: 1,
@@ -2092,6 +2018,152 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
   }
 });
 
+// Manual Badge and Level Update API - useful for migration or manual updates
+router.post("/users/update-badges-levels", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Get all users with their latest XP data
+    const users = await Users.findAll({
+      attributes: ['id', 'userCode', 'name', 'email'],
+      transaction
+    });
+
+    const updateResults = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const user of users) {
+      try {
+        // Get user's latest XP from EmployeeXpResults
+        const latestXpRecord = await EmployeeXpResults.findOne({
+          where: { emp_code: user.userCode },
+          order: [['week_start_date', 'DESC']],
+          transaction
+        });
+
+        let totalXp = 0;
+        if (latestXpRecord) {
+          totalXp = latestXpRecord.total_xp || 0;
+        }
+
+        // Calculate new level and badges
+        const newLevel = xpBadgeSystem.calculateLevel(totalXp);
+        const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+        const currentLevelXp = newLevel > 1 ? xpBadgeSystem.getXpForNextLevel(newLevel - 1) : 0;
+        const progress = totalXp >= xpForNext ? 100 : ((totalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+        const badgeProgress = xpBadgeSystem.getBadgeProgress(totalXp);
+        const earnedBadges = xpBadgeSystem.getEarnedBadges(totalXp);
+
+        // Update or create UserLevel record
+        const [userLevel, created] = await UserLevel.findOrCreate({
+          where: { userId: user.id },
+          defaults: {
+            userId: user.id,
+            season_id: null, // Global level not tied to specific season
+            totalXp: totalXp,
+            level: newLevel,
+            xpForNext: xpForNext,
+            progress: Math.min(progress, 100),
+            lastUpdatedAt: new Date()
+          },
+          transaction
+        });
+
+        if (!created) {
+          const oldLevel = userLevel.level;
+          await userLevel.update({
+            totalXp: totalXp,
+            level: newLevel,
+            xpForNext: xpForNext,
+            progress: Math.min(progress, 100),
+            lastUpdatedAt: new Date()
+          }, { transaction });
+
+          // Update the main users table with new XP and level
+          await user.update({
+            totalUserXp: totalXp,
+            curr_levels: newLevel
+          }, { transaction });
+
+          updateResults.push({
+            userId: user.id,
+            userCode: user.userCode,
+            name: user.name,
+            oldLevel: oldLevel,
+            newLevel: newLevel,
+            levelChanged: newLevel !== oldLevel,
+            totalXp: totalXp,
+            currentBadge: badgeProgress.currentBadge.name,
+            earnedBadges: earnedBadges.length,
+            status: 'updated'
+          });
+        } else {
+          // Update the main users table with new XP and level for new user
+          await user.update({
+            totalUserXp: totalXp,
+            curr_levels: newLevel
+          }, { transaction });
+
+          updateResults.push({
+            userId: user.id,
+            userCode: user.userCode,
+            name: user.name,
+            oldLevel: 0,
+            newLevel: newLevel,
+            levelChanged: true,
+            totalXp: totalXp,
+            currentBadge: badgeProgress.currentBadge.name,
+            earnedBadges: earnedBadges.length,
+            status: 'created'
+          });
+        }
+
+        successCount++;
+      } catch (userError) {
+        console.error(`Error updating user ${user.userCode}:`, userError);
+        updateResults.push({
+          userId: user.id,
+          userCode: user.userCode,
+          name: user.name,
+          status: 'error',
+          error: userError.message
+        });
+        errorCount++;
+      }
+    }
+
+    await transaction.commit();
+
+    res.status(200).json({
+      success: true,
+      message: "Badge and level update completed",
+      summary: {
+        totalUsers: users.length,
+        successfulUpdates: successCount,
+        errors: errorCount,
+        usersWhoLeveledUp: updateResults.filter(r => r.levelChanged && r.status !== 'error').length
+      },
+      badgeSystemInfo: {
+        totalBadges: xpBadgeSystem.getAllBadges().length,
+        badgeNames: xpBadgeSystem.getAllBadges().map(b => b.name)
+      },
+      updateResults: updateResults
+    });
+
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error in manual badge update:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update badges and levels",
+      error: error.message
+    });
+  }
+});
+
 // Get ExcelAttendence Data
 router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
   try {
@@ -2099,11 +2171,38 @@ router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
     const pageSize = parseInt(req.query.pageSize) || 10;
     const offset = (page - 1) * pageSize;
 
+    // Auto-calculate week dates
+    const currentDate = new Date();
+
+    // Calculate current week start (Sunday) and end (Saturday)
+    const currentWeekStart = new Date(currentDate);
+    currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
+    currentWeekStart.setHours(0, 0, 0, 0);
+
+    const currentWeekEnd = new Date(currentWeekStart);
+    currentWeekEnd.setDate(currentWeekStart.getDate() + 6); // Set to Saturday
+    currentWeekEnd.setHours(23, 59, 59, 999);
+
+    // Convert to YYYY-MM-DD format for database comparison
+    const weekStartDateStr = currentWeekStart.toISOString().split('T')[0];
+    const weekEndDateStr = currentWeekEnd.toISOString().split('T')[0];
+
     // Optional filters
     const whereClause = {};
     if (req.query.location) whereClause.location = { [Op.like]: `%${req.query.location}%` };
     if (req.query.client) whereClause.client = { [Op.like]: `%${req.query.client}%` };
-    if (req.query.week_start_date) whereClause.week_start_date = req.query.week_start_date;
+
+    // Use auto-calculated week_start_date instead of query parameter
+    if (req.query.week_start_date) {
+      // If specific week_start_date is provided, use it
+      whereClause.week_start_date = req.query.week_start_date;
+    } else {
+      // Otherwise, filter for current week
+      whereClause.week_start_date = {
+        [Op.gte]: weekStartDateStr,
+        [Op.lte]: weekEndDateStr
+      };
+    }
 
     const { count, rows } = await EmployeeXpResults.findAndCountAll({
       where: whereClause,
@@ -2130,6 +2229,12 @@ router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
     res.status(200).json({
       success: true,
       data: rows,
+      weekInfo: {
+        currentWeekStart: weekStartDateStr,
+        currentWeekEnd: weekEndDateStr,
+        autoCalculated: !req.query.week_start_date, // true if dates were auto-calculated
+        weekDescription: `Week of ${currentWeekStart.toLocaleDateString()} - ${currentWeekEnd.toLocaleDateString()}`
+      },
       pagination: {
         currentPage: page,
         pageSize: pageSize,
@@ -2162,7 +2267,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const { id, sections, xpValues, totalXP, type } = req.body;
+    const { id, sections, xpValues, totalXP, type, reward_images } = req.body;
 
     // Validation
     if (!sections || sections < 2 || sections > 20) {
@@ -2209,7 +2314,8 @@ router.post("/wheel/save-configuration", async (req, res) => {
       is_global: true,
       created_by: "admin",
       created_at: new Date(),
-      updated_at: new Date()
+      updated_at: new Date(),
+      reward_images: reward_images || []
     };
 
     let wheelConfig;
@@ -2263,7 +2369,8 @@ router.get("/wheel/configuration/:id", async (req, res) => {
         'total_xp_pool',
         'is_active',
         "is_big",
-        "type"
+        "type",
+        "reward_images"
       ]
     });
 
@@ -2281,7 +2388,8 @@ router.get("/wheel/configuration/:id", async (req, res) => {
       totalXpPool: wheelConfig.total_xp_pool,
       isActive: wheelConfig.is_active,
       isBig: wheelConfig.is_big,
-      type: wheelConfig.type
+      type: wheelConfig.type,
+      reward_images: wheelConfig.reward_images || []
     };
 
     res.status(200).send(
@@ -2364,6 +2472,661 @@ router.post("/big-wheel/deactivate", adminAuthMiddleware, async (req, res) => {
     console.error("Error deactivating wheel configuration:", err);
     res.status(500).send(
       HelperUtils.errorObj("Failed to deactivate wheel configuration")
+    );
+  }
+});
+
+// ===== BONUS SEASON ROUTES =====
+
+// GET /admin/bonus-seasons - Get all bonus seasons
+router.get("/bonus-seasons", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, is_active } = req.query;
+    const offset = (page - 1) * limit;
+
+    const whereClause = {};
+    if (is_active !== undefined) {
+      whereClause.is_active = is_active === 'true';
+    }
+
+    const bonusSeasons = await BonusSeason.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['created_at', 'DESC']]
+    });
+
+    res.status(200).send(
+      HelperUtils.successObj("Bonus seasons retrieved successfully", {
+        seasons: bonusSeasons.rows,
+        total: bonusSeasons.count,
+        page: parseInt(page),
+        totalPages: Math.ceil(bonusSeasons.count / limit)
+      })
+    );
+  } catch (error) {
+    console.error("Error fetching bonus seasons:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch bonus seasons")
+    );
+  }
+});
+
+// GET /admin/bonus-seasons/:id - Get specific bonus season
+router.get("/bonus-seasons/:id", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const bonusSeason = await BonusSeason.findByPk(id);
+
+    if (!bonusSeason) {
+      return res.status(404).send(
+        HelperUtils.errorObj("Bonus season not found")
+      );
+    }
+
+    res.status(200).send(
+      HelperUtils.successObj("Bonus season retrieved successfully", bonusSeason)
+    );
+  } catch (error) {
+    console.error("Error fetching bonus season:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch bonus season")
+    );
+  }
+});
+
+// POST /admin/bonus-seasons - Create new bonus season
+router.post("/bonus-seasons", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const {
+      name,
+      employer_code,
+      season_type,
+      duration_months,
+      description,
+      start_date,
+      end_date,
+      bonus_multiplier,
+      bonus_type,
+      fixed_bonus_amount,
+      is_active,
+      applies_to_games,
+      min_xp_threshold,
+      max_participants
+    } = req.body;
+
+    // Validation
+    if (!name || !employer_code || !season_type) {
+      return res.status(400).send(
+        HelperUtils.errorObj("Name, employer_code, and season_type are required")
+      );
+    }
+
+    if (start_date && end_date && new Date(start_date) >= new Date(end_date)) {
+      return res.status(400).send(
+        HelperUtils.errorObj("End date must be after start date")
+      );
+    }
+
+    const bonusSeason = await BonusSeason.create({
+      name,
+      employer_code,
+      season_type,
+      duration_months,
+      description,
+      start_date,
+      end_date,
+      bonus_multiplier: bonus_multiplier || 1.00,
+      bonus_type: bonus_type || 'percentage',
+      fixed_bonus_amount,
+      is_active: is_active !== undefined ? is_active : true,
+      applies_to_games,
+      min_xp_threshold,
+      max_participants
+    }, { transaction });
+
+    await transaction.commit();
+    res.status(201).send(
+      HelperUtils.successObj("Bonus season created successfully", bonusSeason)
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error creating bonus season:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to create bonus season")
+    );
+  }
+});
+
+// PUT /admin/bonus-seasons/:id - Update bonus season
+router.put("/bonus-seasons/:id", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const bonusSeason = await BonusSeason.findByPk(id);
+    if (!bonusSeason) {
+      return res.status(404).send(
+        HelperUtils.errorObj("Bonus season not found")
+      );
+    }
+
+    // Validation for dates if provided
+    if (updateData.start_date && updateData.end_date) {
+      if (new Date(updateData.start_date) >= new Date(updateData.end_date)) {
+        return res.status(400).send(
+          HelperUtils.errorObj("End date must be after start date")
+        );
+      }
+    }
+
+    await bonusSeason.update(updateData, { transaction });
+    await transaction.commit();
+
+    res.status(200).send(
+      HelperUtils.successObj("Bonus season updated successfully", bonusSeason)
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error updating bonus season:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to update bonus season")
+    );
+  }
+});
+
+// DELETE /admin/bonus-seasons/:id - Delete bonus season
+router.delete("/bonus-seasons/:id", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const bonusSeason = await BonusSeason.findByPk(id);
+
+    if (!bonusSeason) {
+      return res.status(404).send(
+        HelperUtils.errorObj("Bonus season not found")
+      );
+    }
+
+    await bonusSeason.destroy({ transaction });
+    await transaction.commit();
+
+    res.status(200).send(
+      HelperUtils.successObj("Bonus season deleted successfully")
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error deleting bonus season:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to delete bonus season")
+    );
+  }
+});
+
+// GET /admin/bonus-seasons/active/current - Get currently active bonus season
+router.get("/bonus-seasons/active/current", adminAuthMiddleware, async (req, res) => {
+  try {
+    const activeSeason = await BonusSeason.getActiveSeason();
+
+    if (!activeSeason) {
+      return res.status(404).send(
+        HelperUtils.errorObj("No active bonus season found")
+      );
+    }
+
+    res.status(200).send(
+      HelperUtils.successObj("Active bonus season retrieved successfully", activeSeason)
+    );
+  } catch (error) {
+    console.error("Error fetching active bonus season:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch active bonus season")
+    );
+  }
+});
+
+// ===== XP THRESHOLD ROUTES =====
+
+// POST /admin/xp-thresholds/create-threshold - Create specific threshold for app login or registration
+router.post("/xp-thresholds/create-threshold", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { threshold_type, xp_value } = req.body;
+
+    // Validation
+    if (!threshold_type || !['app_login', 'new_registration'].includes(threshold_type)) {
+      return res.status(400).send(
+        HelperUtils.errorObj("threshold_type must be either 'app_login' or 'new_registration'")
+      );
+    }
+
+    if (xp_value === undefined || xp_value < 0) {
+      return res.status(400).send(
+        HelperUtils.errorObj("xp_value is required and must be a positive number")
+      );
+    }
+
+    // Set predefined values based on threshold type
+    const thresholdConfig = {
+      app_login: {
+        game_name: 'Daily App Login',
+        unlock_message: 'Earn XP points for logging into the app daily!',
+        lock_message: 'Complete daily login to earn XP',
+        icon_url: null
+      },
+      new_registration: {
+        game_name: 'New User Registration',
+        unlock_message: 'Welcome bonus XP for new users!',
+        lock_message: 'Registration required to earn bonus XP',
+        icon_url: null
+      }
+    };
+
+    const config = thresholdConfig[threshold_type];
+
+    // Check if this threshold type already exists
+    const existingThreshold = await XpThreshold.findOne({
+      where: { game_type: threshold_type }
+    });
+
+    if (existingThreshold) {
+      return res.status(400).send(
+        HelperUtils.errorObj(`A threshold for ${threshold_type} already exists. Use update instead.`)
+      );
+    }
+
+    const xpThreshold = await XpThreshold.create({
+      game_name: config.game_name,
+      game_type: threshold_type,
+      min_xp_required: parseInt(xp_value),
+      level_required: null,
+      is_active: true,
+      unlock_message: config.unlock_message,
+      lock_message: config.lock_message,
+      icon_url: config.icon_url,
+      sort_order: threshold_type === 'new_registration' ? 1 : 2,
+      requires_consecutive_days: threshold_type === 'app_login' ? 1 : null,
+      additional_requirements: null,
+      reward_on_unlock: null,
+      cooldown_hours: threshold_type === 'app_login' ? 24 : null,
+      max_plays_per_day: threshold_type === 'app_login' ? 1 : null
+    }, { transaction });
+
+    await transaction.commit();
+    res.status(201).send(
+      HelperUtils.successObj("XP threshold created successfully", xpThreshold)
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error creating XP threshold:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to create XP threshold")
+    );
+  }
+});
+
+// GET /admin/xp-thresholds/login-registration - Get login and registration thresholds
+router.get("/xp-thresholds/login-registration", adminAuthMiddleware, async (req, res) => {
+  try {
+    const thresholds = await XpThreshold.findAll({
+      where: {
+        game_type: ['app_login', 'new_registration']
+      },
+      order: [['sort_order', 'ASC']]
+    });
+
+    res.status(200).send(
+      HelperUtils.successObj("Login and registration thresholds retrieved successfully", thresholds)
+    );
+  } catch (error) {
+    console.error("Error fetching login/registration thresholds:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch login and registration thresholds")
+    );
+  }
+});
+
+// GET /admin/xp-thresholds - Get all XP thresholds
+router.get("/xp-thresholds", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, game_type, is_active } = req.query;
+    const offset = (page - 1) * limit;
+
+    const whereClause = {};
+    if (game_type) {
+      whereClause.game_type = game_type;
+    }
+    if (is_active !== undefined) {
+      whereClause.is_active = is_active === 'true';
+    }
+
+    const xpThresholds = await XpThreshold.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['sort_order', 'ASC'], ['min_xp_required', 'ASC']]
+    });
+
+    res.status(200).send(
+      HelperUtils.successObj("XP thresholds retrieved successfully", {
+        thresholds: xpThresholds.rows,
+        total: xpThresholds.count,
+        page: parseInt(page),
+        totalPages: Math.ceil(xpThresholds.count / limit)
+      })
+    );
+  } catch (error) {
+    console.error("Error fetching XP thresholds:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch XP thresholds")
+    );
+  }
+});
+
+// GET /admin/xp-thresholds/:id - Get specific XP threshold
+router.get("/xp-thresholds/:id", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const xpThreshold = await XpThreshold.findByPk(id);
+
+    if (!xpThreshold) {
+      return res.status(404).send(
+        HelperUtils.errorObj("XP threshold not found")
+      );
+    }
+
+    res.status(200).send(
+      HelperUtils.successObj("XP threshold retrieved successfully", xpThreshold)
+    );
+  } catch (error) {
+    console.error("Error fetching XP threshold:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch XP threshold")
+    );
+  }
+});
+
+// POST /admin/xp-thresholds - Create new XP threshold
+router.post("/xp-thresholds", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const {
+      game_name,
+      game_type,
+      min_xp_required,
+      level_required,
+      is_active,
+      unlock_message,
+      lock_message,
+      icon_url,
+      sort_order,
+      requires_consecutive_days,
+      additional_requirements,
+      reward_on_unlock,
+      cooldown_hours,
+      max_plays_per_day
+    } = req.body;
+
+    // Validation
+    if (!game_name || !game_type || min_xp_required === undefined) {
+      return res.status(400).send(
+        HelperUtils.errorObj("game_name, game_type, and min_xp_required are required")
+      );
+    }
+
+    // Check for duplicate game name
+    const existingGame = await XpThreshold.findOne({
+      where: { game_name }
+    });
+
+    if (existingGame) {
+      return res.status(400).send(
+        HelperUtils.errorObj("A game with this name already exists")
+      );
+    }
+
+    const xpThreshold = await XpThreshold.create({
+      game_name,
+      game_type,
+      min_xp_required: min_xp_required || 0,
+      level_required,
+      is_active: is_active !== undefined ? is_active : true,
+      unlock_message,
+      lock_message,
+      icon_url,
+      sort_order: sort_order || 0,
+      requires_consecutive_days,
+      additional_requirements,
+      reward_on_unlock,
+      cooldown_hours,
+      max_plays_per_day
+    }, { transaction });
+
+    await transaction.commit();
+    res.status(201).send(
+      HelperUtils.successObj("XP threshold created successfully", xpThreshold)
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error creating XP threshold:", error);
+
+    // Handle unique constraint errors
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).send(
+        HelperUtils.errorObj("A game with this name already exists")
+      );
+    }
+
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to create XP threshold")
+    );
+  }
+});
+
+// PUT /admin/xp-thresholds/:id - Update XP threshold
+router.put("/xp-thresholds/:id", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const xpThreshold = await XpThreshold.findByPk(id);
+    if (!xpThreshold) {
+      return res.status(404).send(
+        HelperUtils.errorObj("XP threshold not found")
+      );
+    }
+
+    // Check for duplicate game name if name is being updated
+    if (updateData.game_name && updateData.game_name !== xpThreshold.game_name) {
+      const existingGame = await XpThreshold.findOne({
+        where: {
+          game_name: updateData.game_name,
+          id: { [Op.ne]: id }
+        }
+      });
+
+      if (existingGame) {
+        return res.status(400).send(
+          HelperUtils.errorObj("A game with this name already exists")
+        );
+      }
+    }
+
+    await xpThreshold.update(updateData, { transaction });
+    await transaction.commit();
+
+    res.status(200).send(
+      HelperUtils.successObj("XP threshold updated successfully", xpThreshold)
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error updating XP threshold:", error);
+
+    // Handle unique constraint errors
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).send(
+        HelperUtils.errorObj("A game with this name already exists")
+      );
+    }
+
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to update XP threshold")
+    );
+  }
+});
+
+// DELETE /admin/xp-thresholds/:id - Delete XP threshold
+router.delete("/xp-thresholds/:id", adminAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const xpThreshold = await XpThreshold.findByPk(id);
+
+    if (!xpThreshold) {
+      return res.status(404).send(
+        HelperUtils.errorObj("XP threshold not found")
+      );
+    }
+
+    await xpThreshold.destroy({ transaction });
+    await transaction.commit();
+
+    res.status(200).send(
+      HelperUtils.successObj("XP threshold deleted successfully")
+    );
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error deleting XP threshold:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to delete XP threshold")
+    );
+  }
+});
+
+// GET /admin/xp-thresholds/user/:userId/status - Get user's unlock status for all games
+router.get("/xp-thresholds/user/:userId/status", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get user's XP and level
+    const user = await Users.findByPk(userId, {
+      include: [{
+        model: UserLevel,
+        as: 'UserLevel'
+      }]
+    });
+
+    if (!user) {
+      return res.status(404).send(
+        HelperUtils.errorObj("User not found")
+      );
+    }
+
+    // Calculate total XP for user (you might need to adjust this based on your XP calculation logic)
+    const userXpLogs = await EmployeeXpResults.findAll({
+      where: { userId: userId }
+    });
+
+    const totalXp = userXpLogs.reduce((sum, log) => sum + (log.totalXP || 0), 0);
+    const userLevel = user.UserLevel?.level || 1;
+
+    // Get all thresholds
+    const allThresholds = await XpThreshold.getActiveThresholds();
+
+    // Determine unlock status for each
+    const gameStatus = allThresholds.map(threshold => ({
+      id: threshold.id,
+      game_name: threshold.game_name,
+      game_type: threshold.game_type,
+      min_xp_required: threshold.min_xp_required,
+      level_required: threshold.level_required,
+      is_unlocked: threshold.isUnlockedForUser(totalXp, userLevel),
+      user_xp: totalXp,
+      user_level: userLevel,
+      xp_needed: threshold.min_xp_required > totalXp ? threshold.min_xp_required - totalXp : 0,
+      unlock_message: threshold.unlock_message,
+      lock_message: threshold.lock_message,
+      icon_url: threshold.icon_url
+    }));
+
+    res.status(200).send(
+      HelperUtils.successObj("User game status retrieved successfully", {
+        user_id: userId,
+        total_xp: totalXp,
+        user_level: userLevel,
+        games: gameStatus
+      })
+    );
+  } catch (error) {
+    console.error("Error fetching user game status:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch user game status")
+    );
+  }
+});
+
+// GET /admin/xp-thresholds/game-types - Get available game types
+router.get("/xp-thresholds/game-types", adminAuthMiddleware, async (req, res) => {
+  try {
+    const gameTypes = [
+      { value: 'spin_wheel', label: 'Spin Wheel' },
+      { value: 'quiz', label: 'Quiz Game' },
+      { value: 'daily_challenge', label: 'Daily Challenge' },
+      { value: 'achievement', label: 'Achievement' },
+      { value: 'custom', label: 'Custom Game' }
+    ];
+
+    res.status(200).send(
+      HelperUtils.successObj("Game types retrieved successfully", gameTypes)
+    );
+  } catch (error) {
+    console.error("Error fetching game types:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch game types")
+    );
+  }
+});
+
+// Upload reward image
+router.post("/upload-reward-image", adminAuthMiddleware, upload.single('rewardImage'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send(
+        HelperUtils.errorObj("No image file provided")
+      );
+    }
+
+    // Store the file path or URL
+    const imagePath = `/uploads/${req.file.filename}`;
+
+    res.status(200).send(
+      HelperUtils.successObj("Image uploaded successfully", {
+        imagePath: imagePath,
+        originalName: req.file.originalname,
+        size: req.file.size
+      })
+    );
+  } catch (error) {
+    console.error("Error uploading reward image:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to upload image")
     );
   }
 });

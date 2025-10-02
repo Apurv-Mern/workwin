@@ -39,6 +39,62 @@ class SpinTheWheel extends Model {
                 type: DataTypes.TEXT,
                 allowNull: false
             },
+            // reward_images: {
+            //     type: DataTypes.TEXT,
+            //     allowNull: true,
+            //     get() {
+            //         const rawValue = this.getDataValue('reward_images');
+            //         console.log('Raw reward_images from DB:', rawValue);
+            //         return rawValue ? `https://localhost:3008/${JSON.parse(rawValue)}` : [];
+            //     },
+            //     set(value) {
+            //         this.setDataValue('reward_images', JSON.stringify(value || []));
+            //     }
+            // },
+            reward_images: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                get() {
+                    const rawValue = this.getDataValue('reward_images');
+                    if (!rawValue) {
+                        return [];
+                    }
+
+                    try {
+                        // Parse the JSON string from database
+                        let parsed = JSON.parse(rawValue);
+
+                        // Ensure it's an array
+                        if (!Array.isArray(parsed)) {
+                            parsed = [parsed];
+                        }
+
+                        // Convert relative paths to full URLs, but keep empty strings as null
+                        return parsed.map(imagePath => {
+                            if (!imagePath || imagePath.trim() === '') {
+                                return null;
+                            }
+                            return imagePath.startsWith('http')
+                                ? imagePath
+                                : `http://localhost:3008/workwin-backend${imagePath}`;
+                        });
+
+                    } catch (error) {
+                        console.error('Error parsing reward_images:', error, 'Raw value:', rawValue);
+                        return [];
+                    }
+                },
+                set(value) {
+                    if (!value || (Array.isArray(value) && value.length === 0)) {
+                        this.setDataValue('reward_images', null);
+                    } else {
+                        // Store as JSON string in database
+                        const arrayValue = Array.isArray(value) ? value : [value];
+                        this.setDataValue('reward_images', JSON.stringify(arrayValue));
+                    }
+                }
+            }
+            ,
             created_at: {
                 type: DataTypes.DATE,
                 defaultValue: DataTypes.NOW

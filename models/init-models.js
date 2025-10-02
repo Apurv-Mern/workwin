@@ -16,6 +16,8 @@ const _Weights = require("./Weights");
 const _Rewards = require("./Rewards");
 const _EmployeeXpResults = require("./EmployeeXpResults");
 const _SpinTheWheel = require("./SpinTheWheel");
+const _BonusSeason = require("./BonusSeason");
+const _XpThreshold = require("./XpThreshold");
 
 function initModels(sequelize) {
   const Permissions = _Permissions.init(sequelize, DataTypes);
@@ -33,6 +35,8 @@ function initModels(sequelize) {
   const Rewards = _Rewards.init(sequelize, DataTypes);
   const EmployeeXpResults = _EmployeeXpResults.init(sequelize, DataTypes);
   const SpinTheWheel = _SpinTheWheel.init(sequelize, DataTypes);
+  const BonusSeason = _BonusSeason.init(sequelize, DataTypes);
+  const XpThreshold = _XpThreshold.init(sequelize, DataTypes);
 
   // Define relationships
   RolePermissions.belongsTo(Permissions, {
@@ -103,7 +107,9 @@ function initModels(sequelize) {
     Weights,
     Rewards,
     EmployeeXpResults,
-    SpinTheWheel
+    SpinTheWheel,
+    BonusSeason,
+    XpThreshold
   };
 }
 
