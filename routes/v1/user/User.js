@@ -4,7 +4,7 @@ const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, } = ModelsData;
+const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, XpThreshold } = ModelsData;
 const HelperUtils = require("./../../../utils/helpers");
 const xpBadgeSystem = require("./../../../utils/xpBadgeSystem");
 const updateLevelAndUserXP = require('../../../utils/updateLevel');
@@ -52,81 +52,100 @@ const upload = multer({
   },
 });
 
-/**
- * @swagger
- * /user_signup:
- *   post:
- *     summary: User Signup
- *     description: This API is used for signup user or login and return the token in response.
- *     tags: [User]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               name:
- *                 type: string
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Signup successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     name:
- *                       type: string
- *                     email:
- *                       type: string
- *                     token:
- *                       type: string
- *       401:
- *         description: "Error in signup"
- */
-
 // User Signup
 router.post('/user_signup', async (req, res) => {
   const { name, email, password, employerCode } = req.body;
+  const transaction = await sequelize.transaction();
+
   try {
     if (!email || !password || !name || !employerCode) {
       return res.status(401).send(HelperUtils.errorObj("Name, email, employer code and password are required"));
     }
     //Check if employerCode exists
-    const employer = await Users.findOne({ where: { employerCode: employerCode } });
+    const employer = await Users.findOne({ where: { employerCode: employerCode }, transaction });
     if (!employer) {
       return res.status(401).send(HelperUtils.errorObj("Invalid employer code"));
     }
 
-    const existingUser = await Users.findOne({ where: { email } });
+    const existingUser = await Users.findOne({ where: { email }, transaction });
     if (existingUser) {
       return res.status(401).send(HelperUtils.errorObj("This email already exists"));
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await Users.create({ name, email, password: hashedPassword, userCode: employerCode });
+    const user = await Users.create({ name, email, password: hashedPassword, userCode: employerCode }, { transaction });
 
-    let userRole = await Roles.findOne({ where: { name: "User" } });
+    let userRole = await Roles.findOne({ where: { name: "User" }, transaction });
     if (!userRole) {
-      userRole = await Roles.create({ name: "User", description: "Default app user" });
+      userRole = await Roles.create({ name: "User", description: "Default app user" }, { transaction });
     }
 
     await sequelize.models.UserRoles.create({
       userId: user.id,
       roleId: userRole.id
+    }, { transaction });
+
+    // Award registration XP
+    const xpThreshold = await XpThreshold.findOne({
+      where: {
+        game_type: 'new_registration',
+        is_active: true
+      },
+      transaction
     });
+
+    if (xpThreshold) {
+      // Base XP from threshold configuration
+      let baseXP = xpThreshold.min_xp_required;
+
+      // Check for active bonus season and apply multiplier
+      const activeBonusSeason = await BonusSeason.getActiveSeason();
+      let finalXP = baseXP;
+      let bonusMultiplier = 1;
+
+      if (activeBonusSeason) {
+        bonusMultiplier = parseFloat(activeBonusSeason.bonus_multiplier) || 1;
+        finalXP = Math.floor(baseXP * bonusMultiplier);
+      }
+
+      // Log XP gain
+      const currentDate = new Date();
+      const dateOnly = currentDate.toISOString().split('T')[0];
+
+      let logDescription = `New Registration: Welcome bonus ${finalXP} XP`;
+      if (activeBonusSeason) {
+        logDescription += ` (${bonusMultiplier}x ${activeBonusSeason.name} bonus)`;
+      }
+
+      await UserXpLog.create({
+        userId: user.id,
+        season_id: activeBonusSeason?.id || null,
+        source: 'game',
+        type: 'new_registration',
+        xp: finalXP,
+        date: dateOnly,
+        description: logDescription
+      }, { transaction });
+
+      // Create initial user level
+      const newLevel = xpBadgeSystem.calculateLevel(finalXP);
+
+      await UserLevel.create({
+        userId: user.id,
+        season_id: null,
+        totalXp: finalXP,
+        level: newLevel,
+        xpForNext: xpBadgeSystem.getXpForNextLevel(newLevel),
+        progress: 0,
+        lastUpdatedAt: currentDate
+      }, { transaction });
+
+      // Update users table
+      await user.update({
+        totalUserXp: finalXP,
+        curr_levels: newLevel
+      }, { transaction });
+    }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
       expiresIn: "1d"
@@ -136,69 +155,33 @@ router.post('/user_signup', async (req, res) => {
       userId: user.id,
       token,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-    });
+    }, { transaction });
+
+    await transaction.commit();
 
     const userData = user.toJSON();
     delete userData.password;
 
     res.status(200).send(HelperUtils.successObj("Signup successful", { ...userData, token }));
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
     console.error("Error in user_signup api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
 });
 
-/**
- * @swagger
- * /user_login:
- *   post:
- *     summary: User Login
- *     description: This API is used for user login and returns a token.
- *     tags: [User]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     name:
- *                       type: string
- *                     email:
- *                       type: string
- *                     token:
- *                       type: string
- *       401:
- *         description: "Invalid credentials"
- */
-
 router.post('/user_login', async (req, res) => {
   const { email, password } = req.body;
+  const transaction = await sequelize.transaction();
+
   try {
     if (!email || !password) {
       return res.status(401).send(HelperUtils.errorObj("Email and password are required"));
     }
 
-    const user = await Users.findOne({ where: { email } });
+    const user = await Users.findOne({ where: { email }, transaction });
     if (!user) {
       return res.status(401).send(HelperUtils.errorObj("Invalid credentials"));
     }
@@ -220,7 +203,125 @@ router.post('/user_login', async (req, res) => {
       userId: user.id,
       token,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    }, { transaction });
+
+    // Award login XP only for first login of the week in current month
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth() + 1; // 1-12
+    const currentWeekStart = new Date(currentDate);
+    currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
+    currentWeekStart.setHours(0, 0, 0, 0);
+    const weekStartDateStr = currentWeekStart.toISOString().split('T')[0];
+
+    // Check if user has already received login XP for this week in current month
+    const existingWeeklyLoginXp = await UserXpLog.findOne({
+      where: {
+        userId: user.id,
+        type: 'app_login',
+        date: {
+          [Op.gte]: weekStartDateStr
+        },
+        [Op.and]: [
+          sequelize.where(sequelize.fn('YEAR', sequelize.col('date')), currentYear),
+          sequelize.where(sequelize.fn('MONTH', sequelize.col('date')), currentMonth)
+        ]
+      },
+      transaction
     });
+
+    if (!existingWeeklyLoginXp) {
+      // Award login XP for first time this week in current month
+      const xpThreshold = await XpThreshold.findOne({
+        where: {
+          game_type: 'app_login',
+          is_active: true
+        },
+        transaction
+      });
+
+      if (xpThreshold) {
+        // Base XP from threshold configuration  
+        let baseXP = xpThreshold.min_xp_required;
+
+        // Check for active bonus season and apply multiplier
+        const activeBonusSeason = await BonusSeason.getActiveSeason();
+        let finalXP = baseXP;
+        let bonusMultiplier = 1;
+
+        if (activeBonusSeason) {
+          bonusMultiplier = parseFloat(activeBonusSeason.bonus_multiplier) || 1;
+          finalXP = Math.floor(baseXP * bonusMultiplier);
+        }
+
+        // Log XP gain
+        const dateOnly = currentDate.toISOString().split('T')[0];
+
+        let logDescription = `App Login: First login of week - Earned ${finalXP} XP`;
+        if (activeBonusSeason) {
+          logDescription += ` (${bonusMultiplier}x ${activeBonusSeason.name} bonus)`;
+        }
+
+        await UserXpLog.create({
+          userId: user.id,
+          season_id: activeBonusSeason?.id || null,
+          source: 'game',
+          type: 'app_login',
+          xp: finalXP,
+          date: dateOnly,
+          description: logDescription
+        }, { transaction });
+
+        // Update user level and badges
+        let userLevel = await UserLevel.findOne({
+          where: { userId: user.id },
+          transaction
+        });
+
+        if (!userLevel) {
+          // Create initial user level
+          const newLevel = xpBadgeSystem.calculateLevel(finalXP);
+          userLevel = await UserLevel.create({
+            userId: user.id,
+            season_id: null,
+            totalXp: finalXP,
+            level: newLevel,
+            xpForNext: xpBadgeSystem.getXpForNextLevel(newLevel),
+            progress: 0,
+            lastUpdatedAt: currentDate
+          }, { transaction });
+
+          // Update users table
+          await user.update({
+            totalUserXp: finalXP,
+            curr_levels: newLevel
+          }, { transaction });
+        } else {
+          // Update existing level
+          const newTotalXp = userLevel.totalXp + finalXP;
+          const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
+          const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+          const currentLevelXp = newLevel > 1 ? xpBadgeSystem.getXpForNextLevel(newLevel - 1) : 0;
+          const progress = newTotalXp >= xpForNext ? 100 : ((newTotalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+
+          await userLevel.update({
+            totalXp: newTotalXp,
+            level: newLevel,
+            xpForNext: xpForNext,
+            progress: Math.min(progress, 100),
+            lastUpdatedAt: currentDate
+          }, { transaction });
+
+          // Update users table
+          await user.update({
+            totalUserXp: newTotalXp,
+            curr_levels: newLevel
+          }, { transaction });
+        }
+      }
+    }
+
+    await transaction.commit();
 
     const userData = user.toJSON();
     delete userData.password;
@@ -228,46 +329,13 @@ router.post('/user_login', async (req, res) => {
     res.status(200).send(HelperUtils.successObj("Login successful", { ...userData, token }));
 
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
     console.error("Error in user_login api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
 });
-
-/**
- * @swagger
- * /me:
- *   get:
- *     summary: Get User Profile
- *     description: This API fetches the user profile.
- *     tags: [User]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: User profile fetched
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     name:
- *                       type: string
- *                     email:
- *                       type: string
- *                     roles:
- *                       type: array
- *                       items:
- *                         type: string
- *       401:
- *         description: "Invalid input: user is not defined"
- */
 
 router.get('/me', userAuthMiddleware, async (req, res) => {
   const user = req.user;
@@ -721,42 +789,6 @@ router.post('/save_profile', userAuthMiddleware, async (req, res) => {
   }
 });
 
-/**
- * @swagger
- * /change_password:
- *   post:
- *     summary: Change Password
- *     description: This API allows authenticated users to change their password.
- *     tags: [User]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               oldPassword:
- *                 type: string
- *               newPassword:
- *                 type: string
- *               confirmPassword:
- *                 type: string
- *     responses:
- *       200:
- *         description: "Password changed successfully"
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *       401:
- *         description: "Old password is incorrect"
- */
-
 router.post('/change_password', userAuthMiddleware, async (req, res) => {
   try {
     const { oldPassword, newPassword, confirmPassword } = req.body;
@@ -786,36 +818,6 @@ router.post('/change_password', userAuthMiddleware, async (req, res) => {
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
 });
-
-/**
- * @swagger
- * /forgot_password:
- *   post:
- *     summary: Forgot Password
- *     description: This API sends a password reset link to the user's email.
- *     tags: [User]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               email:
- *                 type: string
- *     responses:
- *       200:
- *         description: "Password reset instruction sent to email"
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *       400:
- *         description: "Email is required"
- */
 
 router.post('/forgot_password', async (req, res) => {
   const { email } = req.body;
@@ -855,40 +857,6 @@ router.post('/forgot_password', async (req, res) => {
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
 });
-
-/**
- * @swagger
- * /reset_password_web:
- *   post:
- *     summary: Reset Password
- *     description: This API resets the user's password using a reset token.
- *     tags: [User]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               token:
- *                 type: string
- *               newPassword:
- *                 type: string
- *               confirmPassword:
- *                 type: string
- *     responses:
- *       200:
- *         description: "Password reset successfully"
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *       401:
- *         description: "Invalid or expired token"
- */
 
 router.post('/reset_password_web', async (req, res) => {
   const { token, newPassword, confirmPassword } = req.body;
@@ -1367,7 +1335,7 @@ router.get('/season/dashboard', async (req, res) => {
       spinWheelType = 'big';
       wheelId = 2; // Dragon wheel
     } else if (currentStreak >= 14 || totalXP >= 25000) {
-      spinWheelType = 'small';
+      spinWheelType = 'big';
       wheelId = 1; // Still Pixie but medium size
     }
 
@@ -1443,6 +1411,7 @@ router.get('/season/dashboard', async (req, res) => {
 
     // Define available mini games based on streak/level
     const allMiniGames = [0, 1, 2, 3];
+    clg
     const unlockedMiniGames = allMiniGames.slice(0, currentWeekNumber);
 
     // Unlock seasons based on current month (0-based)
@@ -1522,7 +1491,7 @@ router.get('/season/dashboard', async (req, res) => {
       },
 
       // Additional user context
-      userStats: {
+      seasonStats: {
         currentStreak: currentStreak,
         totalXP: totalXP,
         gameUnlocked: gameUnlocked,
@@ -1585,6 +1554,211 @@ const calculateSectionProbability = (totalSections, sectionIndex) => {
 
 //   return colors[index % colors.length];
 // };
+
+// Spin Wheel XP Award API
+router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const userId = req.user.userId;
+    const { rewardValue, wheelType, sectionId, rewardType } = req.body;
+
+    // Validation for reward type
+    if (!rewardType || !['xp', 'reward'].includes(rewardType)) {
+      return res.status(400).send(
+        HelperUtils.errorObj("rewardType must be either 'xp' or 'reward'")
+      );
+    }
+
+    if (!wheelType || typeof wheelType !== 'string' || wheelType.trim() === '') {
+      return res.status(400).send(
+        HelperUtils.errorObj("wheelType must be a non-empty string")
+      );
+    }
+
+    if (!rewardValue || typeof rewardValue !== 'string' || rewardValue.trim() === '') {
+      return res.status(400).send(
+        HelperUtils.errorObj("rewardValue must be a non-empty string")
+      );
+    }
+
+    // Get user details
+    const user = await Users.findByPk(userId, { transaction });
+    if (!user) {
+      return res.status(404).send(HelperUtils.errorObj("User not found"));
+    }
+
+    let finalXP = 0;
+    let bonusMultiplier = 1;
+    let seasonInfo = null;
+    let rewardInfo = null;
+
+    // Check for active bonus season
+    const activeBonusSeason = await BonusSeason.getActiveSeason();
+    if (activeBonusSeason) {
+      bonusMultiplier = parseFloat(activeBonusSeason.bonus_multiplier) || 1;
+      seasonInfo = {
+        seasonName: activeBonusSeason.name,
+        seasonType: activeBonusSeason.season_type,
+        multiplier: bonusMultiplier
+      };
+    }
+
+    // Handle different reward types
+    if (rewardType === 'xp') {
+      // For XP rewards, validate that rewardValue can be converted to positive integer
+      const xpValue = parseInt(rewardValue, 10);
+
+      if (isNaN(xpValue) || xpValue <= 0 || !Number.isInteger(xpValue)) {
+        return res.status(400).send(
+          HelperUtils.errorObj("rewardValue must be a valid positive integer for XP rewards (e.g., '500')")
+        );
+      }
+
+      // Apply bonus season multiplier to XP
+      finalXP = activeBonusSeason ? Math.floor(xpValue * bonusMultiplier) : xpValue;
+    } else if (rewardType === 'reward') {
+      // For non-XP rewards (items like 'PS5', 'Gold Coin', etc.)
+      // No conversion needed, just use the string as is
+      finalXP = 0;
+
+      rewardInfo = {
+        type: 'reward',
+        value: rewardValue,
+        xpAwarded: 0
+      };
+    }
+
+    // Log all spin results (both XP and reward wins) for admin tracking
+    const currentDate = new Date();
+    const dateOnly = currentDate.toISOString().split('T')[0];
+
+    let logDescription;
+    if (rewardType === 'xp') {
+      logDescription = `Spin Wheel ${wheelType}: Won ${finalXP} XP`;
+      if (activeBonusSeason) {
+        logDescription += ` (${bonusMultiplier}x ${activeBonusSeason.name} bonus)`;
+      }
+    } else {
+      // For reward type, log the reward win for admin tracking
+      logDescription = `Spin Wheel ${wheelType}: Won "${rewardValue}"`;
+      if (activeBonusSeason) {
+        logDescription += ` (during ${activeBonusSeason.name})`;
+      }
+    }
+
+    // Create log entry for both XP and reward wins (for admin tracking)
+    await UserXpLog.create({
+      userId: userId,
+      season_id: activeBonusSeason?.id || null,
+      source: 'game',
+      type: `wheel_spin_${wheelType}`,
+      xp: finalXP, // 0 for rewards, actual XP for XP wins
+      date: dateOnly,
+      description: logDescription,
+      reward_type: rewardType,
+      reward_value: rewardValue
+    }, { transaction });
+
+    // Update user level and badges only if XP is awarded
+    if (finalXP > 0) {
+      let userLevel = await UserLevel.findOne({
+        where: { userId: userId },
+        transaction
+      });
+
+      if (!userLevel) {
+        // Create initial user level
+        const newLevel = xpBadgeSystem.calculateLevel(finalXP);
+        userLevel = await UserLevel.create({
+          userId: userId,
+          season_id: null,
+          totalXp: finalXP,
+          level: newLevel,
+          xpForNext: xpBadgeSystem.getXpForNextLevel(newLevel),
+          progress: 0,
+          lastUpdatedAt: currentDate
+        }, { transaction });
+
+        // Update users table
+        await user.update({
+          totalUserXp: finalXP,
+          curr_levels: newLevel
+        }, { transaction });
+      } else {
+        // Update existing level
+        const newTotalXp = userLevel.totalXp + finalXP;
+        const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
+        const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+        const currentLevelXp = newLevel > 1 ? xpBadgeSystem.getXpForNextLevel(newLevel - 1) : 0;
+        const progress = newTotalXp >= xpForNext ? 100 : ((newTotalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+
+        await userLevel.update({
+          totalXp: newTotalXp,
+          level: newLevel,
+          xpForNext: xpForNext,
+          progress: Math.min(progress, 100),
+          lastUpdatedAt: currentDate
+        }, { transaction });
+
+        // Update users table
+        await user.update({
+          totalUserXp: newTotalXp,
+          curr_levels: newLevel
+        }, { transaction });
+      }
+    }
+
+    await transaction.commit();
+
+    // Get updated badge progress and user stats
+    const updatedUserLevel = await UserLevel.findOne({ where: { userId: userId } });
+    const badgeProgress = xpBadgeSystem.getBadgeProgress(updatedUserLevel?.totalXp || 0);
+    const leveledUp = finalXP > 0 && updatedUserLevel && updatedUserLevel.level > (updatedUserLevel.level - Math.floor(finalXP / 1000));
+
+    // Prepare response
+    const response = {
+      success: true,
+      message: `Spin wheel ${rewardType} awarded successfully`,
+      spinning: {
+        wheelType: wheelType,
+        sectionId: sectionId,
+        rewardType: rewardType
+      },
+      winnings: rewardType === 'xp' ? {
+        type: 'xp',
+        originalXP: parseInt(rewardValue, 10),
+        bonusMultiplier: bonusMultiplier,
+        finalXP: finalXP
+      } : {
+        type: 'reward',
+        rewardValue: rewardValue,
+        xpAwarded: 0,
+        bonusMultiplier: bonusMultiplier
+      },
+      seasonInfo: seasonInfo,
+      userStats: updatedUserLevel ? {
+        totalXp: updatedUserLevel.totalXp,
+        level: updatedUserLevel.level,
+        leveledUp: leveledUp,
+        currentBadge: badgeProgress.currentBadge,
+        badgeProgress: badgeProgress.progress,
+        xpToNextBadge: badgeProgress.xpToNext
+      } : null
+    };
+
+    res.status(200).send(HelperUtils.successObj("Spin wheel reward processed successfully", response));
+
+  } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    console.error("Error in spin-wheel/award-xp API:", error);
+    return res.status(500).send(
+      HelperUtils.errorObj("Failed to award spin wheel XP")
+    );
+  }
+});
 
 
 module.exports = router;

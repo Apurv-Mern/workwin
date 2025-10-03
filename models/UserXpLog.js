@@ -39,6 +39,14 @@ class UserXpLog extends Model {
       description: {
         type: DataTypes.STRING,
         allowNull: true
+      },
+      reward_type: {
+        type: DataTypes.STRING,
+        allowNull: true
+      },
+      reward_value: {
+        type: DataTypes.STRING,
+        allowNull: true
       }
     }, {
       sequelize,
