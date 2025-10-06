@@ -1458,7 +1458,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     };
 
     // Function to calculate season bonus XP based on consecutive perfect weeks
-    const calculateSeasonBonus = async (empCode, currentWeekPerfect, transaction) => {
+    const calculateSeasonBonus = async (empCode, email, currentWeekPerfect, transaction) => {
       if (!currentWeekPerfect) {
         // If current week is not perfect, no bonus and reset streak
         return {
@@ -1467,9 +1467,14 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         };
       }
 
-      // Get all previous records to count consecutive perfect weeks
+      // Get all previous records to count consecutive perfect weeks (using both empCode and email)
       const previousRecords = await EmployeeXpResults.findAll({
-        where: { emp_code: empCode },
+        where: {
+          [Op.and]: [
+            { emp_code: empCode },
+            { email: email }
+          ]
+        },
         order: [["week_start_date", "DESC"]],
         attributes: ['total_days_present'],
         transaction
@@ -1572,12 +1577,17 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     };
 
     // Function to calculate overall streak (considering previous weeks)
-    const calculateOverallStreak = async (empCode, currentWeekAttendance, transaction) => {
+    const calculateOverallStreak = async (empCode, email, currentWeekAttendance, transaction) => {
       const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
 
-      // Get the most recent record for this employee
+      // Get the most recent record for this specific employee (using both empCode and email)
       const latestRecord = await EmployeeXpResults.findOne({
-        where: { emp_code: empCode },
+        where: {
+          [Op.and]: [
+            { emp_code: empCode },
+            { email: email }
+          ]
+        },
         order: [["upload_date", "DESC"]],
         transaction
       });
@@ -1618,21 +1628,34 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     };
 
     // Function to update user level and badges based on new XP
-    const updateUserLevelAndBadges = async (empCode, newTotalXp, transaction) => {
+    const updateUserLevelAndBadges = async (empCode, email, weeklyAttendanceXP, transaction) => {
       try {
-        // Find the user by employee code
+        // Find the user by both employee code AND email for unique identification
         const user = await Users.findOne({
-          where: { userCode: empCode },
+          where: {
+            [Op.and]: [
+              { userCode: empCode },
+              { email: email }
+            ]
+          },
           transaction
         });
 
         if (!user) {
-          console.warn(`User not found for employee code: ${empCode}`);
+          console.warn(`User not found for employee code: ${empCode} and email: ${email}`);
           return {
             updated: false,
             reason: 'User not found'
           };
         }
+
+        // Get current total XP from users table (includes XP from all sources: login, registration, spin wheel, etc.)
+        const currentTotalUserXp = user.totalUserXp || 0;
+
+        // Add new weekly attendance XP to existing total XP
+        const newTotalXp = currentTotalUserXp + weeklyAttendanceXP;
+
+        console.log(`User ${empCode} XP Update: Current: ${currentTotalUserXp}, Weekly Attendance: ${weeklyAttendanceXP}, New Total: ${newTotalXp}`);
 
         // Calculate new level based on total XP
         const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
@@ -1672,7 +1695,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
             lastUpdatedAt: new Date()
           }, { transaction });
 
-          // Update the main users table with new XP and level
+          // Update the main users table with new TOTAL XP (adding to existing)
           await user.update({
             totalUserXp: newTotalXp,
             curr_levels: newLevel
@@ -1685,14 +1708,16 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
             oldLevel: oldLevel,
             newLevel: newLevel,
             leveledUp: leveledUp,
-            totalXp: newTotalXp,
+            oldTotalXp: currentTotalUserXp,
+            weeklyXpAdded: weeklyAttendanceXP,
+            newTotalXp: newTotalXp,
             currentBadge: badgeProgress.currentBadge,
             earnedBadges: earnedBadges.length,
             badgeProgress: badgeProgress.progress,
             xpToNextBadge: badgeProgress.xpToNext
           };
         } else {
-          // Update the main users table with new XP and level for new user
+          // Update the main users table with new TOTAL XP for new user
           await user.update({
             totalUserXp: newTotalXp,
             curr_levels: newLevel
@@ -1705,7 +1730,9 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
             oldLevel: 0,
             newLevel: newLevel,
             leveledUp: true,
-            totalXp: newTotalXp,
+            oldTotalXp: currentTotalUserXp,
+            weeklyXpAdded: weeklyAttendanceXP,
+            newTotalXp: newTotalXp,
             currentBadge: badgeProgress.currentBadge,
             earnedBadges: earnedBadges.length,
             badgeProgress: badgeProgress.progress,
@@ -1723,10 +1750,15 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     };
 
     // Function to log XP gain for attendance
-    const logAttendanceXp = async (empCode, weeklyXp, seasonBonusXp, weekStartDate, description, transaction) => {
+    const logAttendanceXp = async (empCode, email, weeklyXp, seasonBonusXp, weekStartDate, description, transaction) => {
       try {
         const user = await Users.findOne({
-          where: { userCode: empCode },
+          where: {
+            [Op.and]: [
+              { userCode: empCode },
+              { email: email }
+            ]
+          },
           transaction
         });
 
@@ -1791,11 +1823,17 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
 
     for (const row of rawData.filter(r => r.Person)) {
       const empCode = row.EmployeeCode || row.emp_code;
+      const email = row.Email;
       const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
 
-      // Get the latest record to check for existing data and multiplier
+      // Get the latest record to check for existing data and multiplier (using both empCode and email)
       const latestRecord = await EmployeeXpResults.findOne({
-        where: { emp_code: empCode },
+        where: {
+          [Op.and]: [
+            { emp_code: empCode },
+            { email: email }
+          ]
+        },
         order: [["upload_date", "DESC"]],
         transaction
       });
@@ -1809,29 +1847,35 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       // Check if current week is perfect (all 7 days present)
       const currentWeekPerfect = Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length === 7;
 
-      // Calculate streak
-      const streakData = await calculateOverallStreak(empCode, xpCalculation.attendanceDetails, transaction);
+      // Calculate streak (pass email for unique identification)
+      const streakData = await calculateOverallStreak(empCode, email, xpCalculation.attendanceDetails, transaction);
 
-      // Calculate season bonus XP based on consecutive perfect weeks
-      const seasonBonus = await calculateSeasonBonus(empCode, currentWeekPerfect, transaction);
+      // Calculate season bonus XP based on consecutive perfect weeks (pass email for unique identification)
+      const seasonBonus = await calculateSeasonBonus(empCode, email, currentWeekPerfect, transaction);
 
-      // Calculate cumulative XP (sum of all previous weeks + current week)
+      // Calculate cumulative XP (sum of all previous weeks + current week) - using both empCode and email for unique lookup
       const allPreviousRecords = await EmployeeXpResults.findAll({
-        where: { emp_code: empCode },
+        where: {
+          [Op.and]: [
+            { emp_code: empCode },
+            { email: email }
+          ]
+        },
         attributes: ['total_xp'],
         transaction
       });
 
       const previousTotalXP = allPreviousRecords.reduce((sum, record) => sum + record.total_xp, 0);
-      const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
-      const cumulativeXP = previousTotalXP + weeklyXP;
+      const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP; // This week's attendance XP + bonus
+      const cumulativeAttendanceXP = previousTotalXP + weeklyXP; // Total attendance XP from all weeks
 
-      // Update user level and badges with new cumulative XP
-      const userLevelUpdate = await updateUserLevelAndBadges(empCode, cumulativeXP, transaction);
+      // Update user level and badges by ADDING this week's XP to existing totalUserXp
+      const userLevelUpdate = await updateUserLevelAndBadges(empCode, email, weeklyXP, transaction);
 
-      // Log XP gains to UserXpLog
+      // Log XP gains to UserXpLog (pass email for unique identification)
       await logAttendanceXp(
         empCode,
+        email,
         xpCalculation.totalXP,
         seasonBonus.bonusXP,
         calculatedWeekStart,
@@ -1849,7 +1893,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         email: row.Email,
         location: row.locationName,
         client: row.ClientName,
-        total_xp: cumulativeXP, // This now represents cumulative XP across all weeks
+        total_xp: cumulativeAttendanceXP, // This represents cumulative attendance XP across all weeks
         season_bonus_xp: seasonBonus.bonusXP,
         season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
         current_level: userLevelUpdate.updated ? userLevelUpdate.newLevel : 1, // Include calculated level
@@ -1894,7 +1938,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         season_bonus_earned: seasonBonus.bonusXP,
         consecutive_perfect_weeks: seasonBonus.consecutivePerfectWeeks,
         current_week_perfect: currentWeekPerfect,
-        cumulative_xp: cumulativeXP, // Total XP across all weeks
+        cumulative_attendance_xp: cumulativeAttendanceXP, // Total attendance XP across all weeks
+        total_user_xp: userLevelUpdate.updated ? userLevelUpdate.newTotalXp : null, // Total XP from all sources
         current_streak: streakData.currentStreak,
         max_streak: streakData.maxStreak,
         // Badge and Level Information
@@ -1902,6 +1947,9 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           old_level: userLevelUpdate.oldLevel,
           new_level: userLevelUpdate.newLevel,
           leveled_up: userLevelUpdate.leveledUp,
+          old_total_xp: userLevelUpdate.oldTotalXp,
+          weekly_xp_added: userLevelUpdate.weeklyXpAdded,
+          new_total_xp: userLevelUpdate.newTotalXp,
           current_badge: userLevelUpdate.currentBadge,
           earned_badges: userLevelUpdate.earnedBadges,
           badge_progress: userLevelUpdate.badgeProgress,
@@ -2569,6 +2617,52 @@ router.post("/bonus-seasons", adminAuthMiddleware, async (req, res) => {
       );
     }
 
+    // Check for overlapping bonus seasons on the same dates
+    if (start_date && end_date) {
+      const overlappingSeason = await BonusSeason.findOne({
+        where: {
+          [Op.or]: [
+            {
+              // New season starts within existing season
+              start_date: {
+                [Op.lte]: start_date
+              },
+              end_date: {
+                [Op.gte]: start_date
+              }
+            },
+            {
+              // New season ends within existing season
+              start_date: {
+                [Op.lte]: end_date
+              },
+              end_date: {
+                [Op.gte]: end_date
+              }
+            },
+            {
+              // New season completely contains existing season
+              start_date: {
+                [Op.gte]: start_date
+              },
+              end_date: {
+                [Op.lte]: end_date
+              }
+            }
+          ],
+          is_active: true
+        }
+      });
+
+      if (overlappingSeason) {
+        return res.status(400).json(
+          {
+            success: false,
+            message: "Bonus season overlaps with an active season"
+          });
+      }
+    }
+
     const bonusSeason = await BonusSeason.create({
       name,
       employer_code,
@@ -2620,6 +2714,53 @@ router.put("/bonus-seasons/:id", adminAuthMiddleware, async (req, res) => {
       if (new Date(updateData.start_date) >= new Date(updateData.end_date)) {
         return res.status(400).send(
           HelperUtils.errorObj("End date must be after start date")
+        );
+      }
+
+      // Check for overlapping bonus seasons (exclude current season from check)
+      const overlappingSeason = await BonusSeason.findOne({
+        where: {
+          id: {
+            [Op.ne]: id // Exclude current season being updated
+          },
+          [Op.or]: [
+            {
+              // Updated season starts within existing season
+              start_date: {
+                [Op.lte]: updateData.start_date
+              },
+              end_date: {
+                [Op.gte]: updateData.start_date
+              }
+            },
+            {
+              // Updated season ends within existing season
+              start_date: {
+                [Op.lte]: updateData.end_date
+              },
+              end_date: {
+                [Op.gte]: updateData.end_date
+              }
+            },
+            {
+              // Updated season completely contains existing season
+              start_date: {
+                [Op.gte]: updateData.start_date
+              },
+              end_date: {
+                [Op.lte]: updateData.end_date
+              }
+            }
+          ],
+          is_active: true
+        }
+      });
+
+      if (overlappingSeason) {
+        return res.status(400).send(
+          HelperUtils.errorObj(
+            `Cannot update bonus season. There is already an active bonus season "${overlappingSeason.name}" that overlaps with the selected dates (${overlappingSeason.start_date.toISOString().split('T')[0]} to ${overlappingSeason.end_date.toISOString().split('T')[0]})`
+          )
         );
       }
     }
@@ -2717,9 +2858,9 @@ router.post("/xp-thresholds/create-threshold", adminAuthMiddleware, async (req, 
     // Set predefined values based on threshold type
     const thresholdConfig = {
       app_login: {
-        game_name: 'Daily App Login',
-        unlock_message: 'Earn XP points for logging into the app daily!',
-        lock_message: 'Complete daily login to earn XP',
+        game_name: 'Weekly App Login',
+        unlock_message: 'Earn XP points for logging into the app weekly!',
+        lock_message: 'Complete Weekly login to earn XP',
         icon_url: null
       },
       new_registration: {

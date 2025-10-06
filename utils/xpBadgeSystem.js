@@ -9,70 +9,70 @@ const XP_BADGES = [
         name: "Sprouting Badge",
         description: "A tiny seed of potential, just beginning the journey.",
         xpRequired: 0,
-        iconUrl: "/badges/sprouting-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/sprouting-badge.png"
     },
     {
         id: 2,
         name: "Glowleaf Badge",
         description: "A shimmering leaf that shows growth and early magic.",
         xpRequired: 10000,
-        iconUrl: "/badges/glowleaf-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/glowleaf-badge.png"
     },
     {
         id: 3,
         name: "Wandtip Badge",
         description: "The spark of spellcraft begins—players are learning the ropes.",
         xpRequired: 20000,
-        iconUrl: "/badges/wandtip-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/wandtip-badge.png"
     },
     {
         id: 4,
         name: "Runecrest Badge",
         description: "Marked with ancient runes, this badge shows rising mastery.",
         xpRequired: 50000,
-        iconUrl: "/badges/runecrest-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/runecrest-badge.png"
     },
     {
         id: 5,
         name: "Startrail Badge",
         description: "A badge that glows with cosmic energy—players are gaining momentum.",
         xpRequired: 75000,
-        iconUrl: "/badges/startrail-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/startrail-badge.png"
     },
     {
         id: 6,
         name: "Moonspire Badge",
         description: "A towering symbol of achievement, reaching for the stars.",
         xpRequired: 100000,
-        iconUrl: "/badges/moonspire-badge.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/moonspire-badge.png"
     },
     {
         id: 7,
         name: "Phoenix Crest",
         description: "Reborn in fire, this badge represents resilience and power.",
         xpRequired: 250000,
-        iconUrl: "/badges/phoenix-crest.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/phoenix-crest.png"
     },
     {
         id: 8,
         name: "Titan Sigil",
         description: "A mighty emblem of strength, earned by the truly dedicated.",
         xpRequired: 500000,
-        iconUrl: "/badges/titan-sigil.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/titan-sigil.png"
     },
     {
         id: 9,
         name: "Mythborn Medal",
         description: "A legendary token bestowed upon those of near-mythical skill.",
         xpRequired: 750000,
-        iconUrl: "/badges/mythborn-medal.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/mythborn-medal.png"
     },
     {
         id: 10,
         name: "Elder Crown",
         description: "The ultimate badge of honor—worn only by the wisest and most powerful players.",
         xpRequired: 1000000,
-        iconUrl: "/badges/elder-crown.png"
+        iconUrl: "https://workwin.24livehost.com:3025/badges/elder-crown.png"
     }
 ];
 

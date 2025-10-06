@@ -1104,25 +1104,34 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
     const userId = req.user?.userId;
     const year = req.query.year || new Date().getFullYear();
 
-    let empCode = await Users.findOne({
+    // Get user details including empCode, email, and totalUserXp
+    const userDetails = await Users.findOne({
       where: { id: userId },
-      attributes: ["userCode"],
+      attributes: ["userCode", "email", "totalUserXp", "curr_levels"],
     });
 
-    empCode = empCode?.userCode;
+    const empCode = userDetails?.userCode;
+    const userEmail = userDetails?.email;
+    const totalUserXp = userDetails?.totalUserXp || 0;
+    const userLevel = userDetails?.curr_levels || 1;
+
     if (!empCode) {
       return res.status(401).send(HelperUtils.errorObj("Employee code missing from user session"));
     }
 
-    console.log("Fetching attendance for empCode:", empCode, "and year:", year)
+    console.log("Fetching attendance for empCode:", empCode, "email:", userEmail, "and year:", year)
 
     // Create year-based filter for week_start_date
     const startOfYear = new Date(year, 0, 1); // January 1st of the year
     const endOfYear = new Date(year, 11, 31, 23, 59, 59); // December 31st of the year
 
+    // Enhanced user lookup - check by both empCode AND email for unique identification
     const attendanceRecords = await EmployeeXpResults.findAll({
       where: {
-        emp_code: empCode,
+        [Op.and]: [
+          { emp_code: empCode },
+          { email: userEmail }
+        ],
         week_start_date: {
           [Op.gte]: startOfYear, // Greater than or equal to start of year
           [Op.lte]: endOfYear    // Less than or equal to end of year
@@ -1228,7 +1237,13 @@ router.get("/attendance", userAuthMiddleware, async (req, res) => {
         `Attendance data fetched successfully for year ${year}`,
         {
           weeklyData: groupedData,
-          months: monthlyMaxStreakData
+          months: monthlyMaxStreakData,
+          totalXpRecords: {
+            totalUserXp: totalUserXp,
+            currentLevel: userLevel,
+            empCode: empCode,
+            email: userEmail
+          }
         }
       )
     );
@@ -1410,8 +1425,7 @@ router.get('/season/dashboard', async (req, res) => {
     }
 
     // Define available mini games based on streak/level
-    const allMiniGames = [0, 1, 2, 3];
-    clg
+    const allMiniGames = [0, 1, 2, 3, 4];
     const unlockedMiniGames = allMiniGames.slice(0, currentWeekNumber);
 
     // Unlock seasons based on current month (0-based)
@@ -1480,7 +1494,8 @@ router.get('/season/dashboard', async (req, res) => {
       spinTheWheelContents: spinWheelContents,
 
       // Games and bonuses
-      miniGamesUnlocked: unlockedMiniGames,
+      // miniGamesUnlocked: unlockedMiniGames,
+      miniGamesUnlocked: allMiniGames,
       seasonUnlocked,
 
       // Bonus season information
