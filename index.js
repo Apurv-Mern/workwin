@@ -28,7 +28,7 @@ connectToDatabase();
 
 // Serve static files from the "uploads" folder
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+app.use('/badges', express.static(path.join(__dirname, 'badges')));
 app.use(express.urlencoded({ extended: true })); // ✅ Add this line
 app.use(express.json()); // optional, good for parsing JSON bodies
 
