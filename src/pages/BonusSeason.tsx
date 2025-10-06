@@ -184,7 +184,7 @@ const BonusSeason = () => {
     } catch (error: any) {
       console.error("Failed to save bonus season configuration:", error);
       showNotification(
-        "Failed to save bonus season configuration. Please try again.",
+        "Bonus season configuration failed. Season is already active for this duration.",
         "danger"
       );
     } finally {
