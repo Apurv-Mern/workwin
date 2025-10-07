@@ -5,8 +5,10 @@ const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
 const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, XpThreshold } = ModelsData;
+
 const HelperUtils = require("./../../../utils/helpers");
 const xpBadgeSystem = require("./../../../utils/xpBadgeSystem");
+const { getStreakBadge } = require("../../../utils/streakBadges");
 const updateLevelAndUserXP = require('../../../utils/updateLevel');
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = config.get("jwtSecret");
@@ -374,6 +376,7 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     // Get user's total XP from EmployeeXpResults or UserLevel
     let totalUserXp = 0;
     let currentLevel = 1;
+    let currentStreak = 0;
 
     // First, try to get from EmployeeXpResults (most recent)
     const empXpResult = await EmployeeXpResults.findOne({
@@ -384,6 +387,7 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     if (empXpResult) {
       totalUserXp = empXpResult.total_xp || 0;
       currentLevel = empXpResult.current_level || 1;
+      currentStreak = empXpResult.current_streak || 0;
     } else {
       // Fallback to UserLevel table
       const userLevel = await UserLevel.findOne({
@@ -402,6 +406,10 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     // Get badge information
     const badgeProgress = xpBadgeSystem.getBadgeProgress(totalUserXp);
     const earnedBadges = xpBadgeSystem.getEarnedBadges(totalUserXp);
+
+    // // Streak badges system
+
+    const currentStreakBadge = getStreakBadge(currentStreak);
 
     // Get unlocked seasons
     const unlockedSeasons = xpBadgeSystem.getUnlockedSeasons(totalUserXp, currentLevel);
@@ -445,42 +453,48 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
       earnedBadges: earnedBadges.length,
       totalBadges: xpBadgeSystem.getAllBadges().length,
       unlockedSeasons: unlockedSeasons.length,
-      totalSeasons: GetAllSeasonsData.length
+      totalSeasons: GetAllSeasonsData.length,
+      // Streak information
+
     };
 
     // Keep existing badges structure for backward compatibility
 
     userData.badges = badgeProgress.currentBadge
+    userData.currentStreakBadge = currentStreakBadge,
+      // nextStreakBadge: nextStreakBadge.id !== currentStreakBadge.id ? nextStreakBadge : null,
+      // streakProgress: currentStreak >= currentStreakBadge.streakRequired ?
+      //   100 : Math.round((currentStreak / currentStreakBadge.streakRequired) * 100)
 
-    // userData.badges = earnedBadges.map((badge, index) => ({
-    //   id: badge.id,
-    //   level: badge.id,
-    //   name: badge.name,
-    //   title: badge.name,
-    //   description: badge.description,
-    //   xpRequired: badge.xpRequired,
-    //   iconUrl: badge.iconUrl,
-    //   status: "complete",
-    //   earnedAt: new Date(), // You might want to track this in the database
-    //   progress: 100
-    // }));
+      // userData.badges = earnedBadges.map((badge, index) => ({
+      //   id: badge.id,
+      //   level: badge.id,
+      //   name: badge.name,
+      //   title: badge.name,
+      //   description: badge.description,
+      //   xpRequired: badge.xpRequired,
+      //   iconUrl: badge.iconUrl,
+      //   status: "complete",
+      //   earnedAt: new Date(), // You might want to track this in the database
+      //   progress: 100
+      // }));
 
-    // Add current progress badge if not at max level
-    // if (!badgeProgress.isMaxLevel && badgeProgress.nextBadge) {
-    //   userData.badges.push({
-    //     id: badgeProgress.nextBadge.id,
-    //     level: badgeProgress.nextBadge.id,
-    //     name: badgeProgress.nextBadge.name,
-    //     title: badgeProgress.nextBadge.name,
-    //     description: badgeProgress.nextBadge.description,
-    //     xpRequired: badgeProgress.nextBadge.xpRequired,
-    //     iconUrl: badgeProgress.nextBadge.iconUrl,
-    //     status: "in_progress",
-    //     progress: badgeProgress.progress
-    //   });
-    // }
+      // Add current progress badge if not at max level
+      // if (!badgeProgress.isMaxLevel && badgeProgress.nextBadge) {
+      //   userData.badges.push({
+      //     id: badgeProgress.nextBadge.id,
+      //     level: badgeProgress.nextBadge.id,
+      //     name: badgeProgress.nextBadge.name,
+      //     title: badgeProgress.nextBadge.name,
+      //     description: badgeProgress.nextBadge.description,
+      //     xpRequired: badgeProgress.nextBadge.xpRequired,
+      //     iconUrl: badgeProgress.nextBadge.iconUrl,
+      //     status: "in_progress",
+      //     progress: badgeProgress.progress
+      //   });
+      // }
 
-    res.status(200).send(HelperUtils.successObj("User profile fetched", userData));
+      res.status(200).send(HelperUtils.successObj("User profile fetched", userData));
   } catch (error) {
     console.error("Error in user /me api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
@@ -1342,16 +1356,29 @@ router.get('/season/dashboard', async (req, res) => {
     // Game unlocks based on streak (multiples of 7)
     const gameUnlocked = currentStreak > 0 && currentStreak % 7 === 0;
 
-    // Determine spin wheel size based on streak or XP
+    // Determine spin wheel size based on streak
     let spinWheelType = 'small'; // default
-    let wheelId = 1; // Pixie wheel by default
+    let wheelId = 1; // Small wheel by default
 
-    if (currentStreak >= 28 || totalXP >= 50000) {
-      spinWheelType = 'big';
-      wheelId = 2; // Dragon wheel
-    } else if (currentStreak >= 14 || totalXP >= 25000) {
-      spinWheelType = 'big';
-      wheelId = 1; // Still Pixie but medium size
+    // If streak is 7 or more, check the SpinTheWheel table for isBig status
+    if (currentStreak >= 7) {
+      // Check if there's a big wheel configuration active
+      const bigWheelConfig = await SpinTheWheel.findOne({
+        where: {
+          is_big: true,
+          is_active: true
+        },
+        order: [['updated_at', 'DESC']]
+      });
+
+      if (bigWheelConfig) {
+        spinWheelType = 'big';
+        wheelId = bigWheelConfig.id;
+      } else {
+        // Default to small wheel if no big wheel is configured
+        spinWheelType = 'small';
+        wheelId = 1;
+      }
     }
 
     // Get spin wheel configuration based on wheel type
