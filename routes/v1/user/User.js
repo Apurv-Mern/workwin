@@ -1360,26 +1360,22 @@ router.get('/season/dashboard', async (req, res) => {
     let spinWheelType = 'small'; // default
     let wheelId = 1; // Small wheel by default
 
-    // If streak is 7 or more, check the SpinTheWheel table for isBig status
-    if (currentStreak >= 7) {
-      // Check if there's a big wheel configuration active
-      const bigWheelConfig = await SpinTheWheel.findOne({
-        where: {
-          is_big: true,
-          is_active: true
-        },
-        order: [['updated_at', 'DESC']]
-      });
+    const bigWheelConfig = await SpinTheWheel.findOne({
+      where: {
+        is_big: true,
+        is_active: true
+      },
+      order: [['updated_at', 'DESC']]
+    });
 
-      if (bigWheelConfig) {
-        spinWheelType = 'big';
-        wheelId = bigWheelConfig.id;
-      } else {
-        // Default to small wheel if no big wheel is configured
-        spinWheelType = 'small';
-        wheelId = 1;
-      }
+    if (bigWheelConfig) {
+      spinWheelType = 'big';
+      wheelId = bigWheelConfig.id;
+    } else if (currentStreak >= 7) {
+      spinWheelType = 'small';
+      wheelId = 1;
     }
+
 
     // Get spin wheel configuration based on wheel type
     const wheelConfig = await SpinTheWheel.findOne({
