@@ -1018,28 +1018,100 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
 });
 
 // GET /user/leatherboard
-router.get('/leatherboard', userAuthMiddleware, async (req, res) => {
+router.get('/leaderboard', userAuthMiddleware, async (req, res) => {
   try {
-    // Fetch top 10 users who have the 'User' role
+    const { userId } = req.user;
+
+    // Get current user's employer code
+    const currentUser = await Users.findOne({
+      where: { id: userId },
+      attributes: ['userCode', 'name', 'totalUserXp'],
+    });
+
+    if (!currentUser || !currentUser.userCode) {
+      return res.status(400).send(
+        HelperUtils.errorObj("User employer code not found")
+      );
+    }
+
+    const employerCode = currentUser.userCode;
+
+    // Fetch ALL users with the same employer code, having 'User' role, ordered by XP
     const leaderboardUsers = await Users.findAll({
       include: [{
         model: Roles,
         as: 'Roles',
         where: { name: 'User' },
         through: { attributes: [] },
-        attributes: [] // ✅ Do not return Roles in result
+        attributes: [] // Don't return Roles in result
       }],
-      attributes: ['id', 'name', 'email', 'curr_levels', 'totalUserXp'],
-      order: [['totalUserXp', 'DESC']],
-      limit: 10
+      where: {
+        userCode: employerCode // Filter by same employer code
+        // Removed the limit to get ALL users
+      },
+      attributes: [
+        'id',
+        'name',
+        'email',
+        'userCode',
+        'curr_levels',
+        'totalUserXp',
+        'createdAt'
+      ],
+      order: [
+        ['totalUserXp', 'DESC'], // Primary sort: highest XP first
+        ['createdAt', 'ASC']     // Tiebreaker: earlier registration wins
+      ]
+      // No limit - get all users
     });
 
-    res.status(200).send(HelperUtils.successObj("Leaderboard fetch successfully.", leaderboardUsers));
+    // Add ranking position to each user
+    const rankedUsers = leaderboardUsers.map((user, index) => ({
+      rank: index + 1,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      userCode: user.userCode,
+      curr_levels: user.curr_levels,
+      totalUserXp: user.totalUserXp,
+      isCurrentUser: user.id === userId, // Flag to identify current user
+      joinedDate: user.createdAt
+    }));
+
+    // Find current user's position in the leaderboard
+    const currentUserRank = rankedUsers.findIndex(user => user.id === userId) + 1;
+
+    // Get current user's data from the leaderboard
+    const currentUserData = rankedUsers.find(user => user.id === userId);
+
+    // Statistics
+    const stats = {
+      totalUsers: rankedUsers.length,
+      topXP: rankedUsers.length > 0 ? rankedUsers[0].totalUserXp : 0,
+      averageXP: rankedUsers.length > 0
+        ? Math.round(rankedUsers.reduce((sum, user) => sum + user.totalUserXp, 0) / rankedUsers.length)
+        : 0,
+      usersWithXP: rankedUsers.filter(user => user.totalUserXp > 0).length
+    };
+
+    res.status(200).send(
+      HelperUtils.successObj("Leaderboard fetched successfully", {
+        employerCode: employerCode,
+        currentUser: {
+          rank: currentUserRank || null,
+          data: currentUserData || null
+        },
+        statistics: stats,
+        leaderboard: rankedUsers
+      })
+    );
+
   } catch (err) {
     console.error("Error in leaderboard API:", err);
     res.status(500).send(HelperUtils.errorObj("Something went wrong"));
   }
 });
+
 
 // GET /user/leatherboardTopFive
 router.get('/leatherboardTopFive', userAuthMiddleware, async (req, res) => {
@@ -1078,39 +1150,152 @@ router.get('/leatherboardTopFive', userAuthMiddleware, async (req, res) => {
   }
 });
 
-// Get All Rewards
+// Get User's Won Rewards
+// router.get("/rewards", userAuthMiddleware, async (req, res) => {
+//   try {
+//     const userId = req.user.userId;
+
+//     // Get user's won rewards (current rewards they have earned)
+//     const userRewardWins = await UserXpLog.findAll({
+//       where: {
+//         userId: userId,
+//         source: 'game',
+//         reward_type: 'reward',  // Only rewards, not XP
+//         type: {
+//           [Op.like]: 'wheel_spin_%'
+//         }
+//       },
+//       attributes: [
+//         'id',
+//         'reward_value',
+//         'description',
+//         'date',
+//       ],
+//       order: [['date', 'DESC']]
+//     });
+
+//     // Transform user won rewards to match the desired format
+//     const currentRewards = userRewardWins.map(reward => {
+//       let rewardData = {};
+//       return {
+//         id: reward.id,
+//         name: reward?.reward_value,
+//         description: reward.description,
+//         filename: rewardData.filename || rewardData.image_url,
+//       };
+//     });
+
+//     res.status(200).send({
+//       flag: true,
+//       message: "Rewards fetched successfully",
+//       result: {
+//         current: currentRewards,
+//         upcoming: []
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error fetching user's rewards:", error);
+//     res.status(500).send({
+//       flag: false,
+//       message: "Failed to fetch rewards",
+//       result: null
+//     });
+//   }
+// });
+
 router.get("/rewards", userAuthMiddleware, async (req, res) => {
   try {
-    const rewards = await Rewards.findAll({
-      attributes: ["id", "name", "description", "reward_state", "filename"],
+    const userId = req.user.userId;
+
+    // Get user's won rewards (current rewards they have earned)
+    const userRewardWins = await UserXpLog.findAll({
+      where: {
+        userId: userId,
+        source: 'game',
+        reward_type: 'reward',  // Only rewards, not XP
+        type: {
+          [Op.like]: 'wheel_spin_%'
+        }
+      },
+      attributes: [
+        'id',
+        'reward_value',
+        'description',
+        'date',
+      ],
+      order: [['date', 'DESC']]
     });
 
-    // Group the rewards by reward_state
-    const groupedRewards = rewards.reduce((acc, reward) => {
-      const formattedReward = {
-        id: reward.id,
-        name: reward.name,
-        description: reward.description,
-        filename: reward.filename
-          ? `https://workwin.24livehost.com:3025/uploads/${reward.filename}`
-          : null,
-      };
+    // Get spin wheel configuration to match rewards with images
+    const wheelConfig = await SpinTheWheel.findOne({
+      where: { is_active: true },
+      attributes: ['sections', 'reward_images']
+    });
 
-      if (!acc[reward.reward_state]) {
-        acc[reward.reward_state] = [];
+    let rewardImageMap = {};
+
+    if (wheelConfig) {
+      const sections = JSON.parse(wheelConfig.sections);
+      const rewardImages = wheelConfig.getDataValue('reward_images'); // Get raw value to avoid getter issues
+
+      let parsedImages = [];
+      try {
+        parsedImages = JSON.parse(rewardImages);
+      } catch (error) {
+        console.error("Error parsing reward_images:", error);
+        parsedImages = [];
       }
-      acc[reward.reward_state].push(formattedReward);
-      return acc;
-    }, {});
 
-    res
-      .status(200)
-      .send(HelperUtils.successObj("Rewards fetched successfully", groupedRewards));
-  } catch (err) {
-    console.error("Error fetching rewards:", err);
-    res.status(500).send(HelperUtils.errorObj("Failed to fetch rewards"));
+      // Create a map of reward values to their corresponding images
+      sections.forEach((section, index) => {
+        const xpValue = section.xpValue;
+        const imagePath = parsedImages[index];
+
+        // Only map non-numeric xpValues (i.e., rewards like "ps5", "Reward 5")
+        if (typeof xpValue === 'string' && isNaN(xpValue)) {
+          rewardImageMap[xpValue] = imagePath && imagePath.trim() !== ''
+            ? `https://workwin.24livehost.com:3025${imagePath}`
+            : null;
+        }
+      });
+    }
+
+    console.log("Reward Image Map:", rewardImageMap);
+
+    // Transform user won rewards to match the desired format
+    const currentRewards = userRewardWins.map(reward => {
+      const rewardValue = reward.reward_value;
+      const correspondingImage = rewardImageMap[rewardValue] || null;
+
+      return {
+        id: reward.id,
+        name: rewardValue,
+        description: reward.description || `You won ${rewardValue}!`,
+        filename: correspondingImage,
+        dateWon: reward.date
+      };
+    });
+
+    res.status(200).send({
+      flag: true,
+      message: "Rewards fetched successfully",
+      result: {
+        current: currentRewards,
+        upcoming: []
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching user's rewards:", error);
+    res.status(500).send({
+      flag: false,
+      message: "Failed to fetch rewards",
+      result: null
+    });
   }
 });
+
 
 // Get Attendance Data grouped by month
 router.get("/attendance", userAuthMiddleware, async (req, res) => {

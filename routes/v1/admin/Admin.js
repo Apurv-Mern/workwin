@@ -1208,6 +1208,118 @@ router.post(
   }
 );
 
+// Get Spin Wheel Reward Winners (Admin only - only rewards, not XP)
+router.get("/rewards/spin-wheel-winners", adminAuthMiddleware, async (req, res) => {
+  try {
+    const { page = 1, limit = 10, wheelType, dateFrom, dateTo } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Build where clause for rewards only
+    const whereClause = {
+      source: 'game',
+      reward_type: 'reward',  // Only rewards, not XP
+      type: {
+        [Op.like]: 'wheel_spin_%'
+      }
+    };
+
+    // Filter by wheel type if provided
+    if (wheelType) {
+      whereClause.type = `wheel_spin_${wheelType}`;
+    }
+
+    // Filter by date range if provided
+    if (dateFrom || dateTo) {
+      whereClause.date = {};
+      if (dateFrom) {
+        whereClause.date[Op.gte] = dateFrom;
+      }
+      if (dateTo) {
+        whereClause.date[Op.lte] = dateTo;
+      }
+    }
+
+    // Get the rewards without joins first
+    const rewardWinners = await UserXpLog.findAndCountAll({
+      where: whereClause,
+      attributes: [
+        'id',
+        'userId',
+        'reward_type',
+        'reward_value',
+        'type',
+        'date',
+        'description',
+        'season_id',
+        'xp'
+      ],
+      order: [['date', 'DESC'], ['createdAt', 'DESC']],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Get user details separately for each reward log
+    const userIds = rewardWinners.rows.map(log => log.userId);
+    const users = await Users.findAll({
+      where: {
+        id: userIds
+      },
+      attributes: ['id', 'name', 'email', 'userCode']
+    });
+
+    // Create a map for quick user lookup
+    const userMap = users.reduce((map, user) => {
+      map[user.id] = user;
+      return map;
+    }, {});
+
+    // Format the response
+    const formattedWinners = rewardWinners.rows.map(log => {
+      const user = userMap[log.userId];
+      return {
+        id: log.id,
+        user_name: user?.name || 'Unknown User',
+        user_email: user?.email || 'Unknown Email',
+        user_code: user?.userCode || 'Unknown Code',
+        user_id: log.userId,
+        reward_type: log.reward_type,
+        reward_value: log.reward_value,
+        description: log.description,
+        type: log.type,
+        date: log.date,
+        xp_earned: log.xp || 0,
+        season_id: log.season_id,
+        created_at: log.date
+      };
+    });
+
+    res.status(200).send(
+      HelperUtils.successObj("Spin wheel reward winners retrieved successfully", {
+        success: true,
+        data: formattedWinners,
+        pagination: {
+          currentPage: parseInt(page),
+          pageSize: parseInt(limit),
+          totalRecords: rewardWinners.count,
+          totalPages: Math.ceil(rewardWinners.count / limit),
+          hasNextPage: parseInt(page) < Math.ceil(rewardWinners.count / limit),
+          hasPreviousPage: parseInt(page) > 1
+        },
+        filters: {
+          wheelType: wheelType || 'all',
+          dateFrom,
+          dateTo
+        }
+      })
+    );
+  } catch (error) {
+    console.error("Error fetching spin wheel reward winners:", error);
+    res.status(500).send(
+      HelperUtils.errorObj("Failed to fetch spin wheel reward winners")
+    );
+  }
+});
+
 // Get All Rewards
 router.get("/rewards", adminAuthMiddleware, async (req, res) => {
   try {
@@ -3253,7 +3365,6 @@ router.post("/upload-reward-image", adminAuthMiddleware, upload.single('rewardIm
         HelperUtils.errorObj("No image file provided")
       );
     }
-
     // Store the file path or URL
     const imagePath = `/uploads/${req.file.filename}`;
 
