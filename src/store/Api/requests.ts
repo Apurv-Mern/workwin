@@ -14,6 +14,7 @@ import {
   userExcelUpload,
   createReward,
   getRewards,
+  getSpinWheelRewardWinners,
   updateReward,
   deleteReward,
   leaderBoard,
@@ -290,6 +291,37 @@ export const deleteRewardRequest = async (id: any) => {
 export const assignRewardsRequest = async (data: any) => {
   try {
     const response = await api.post(`${assignRewards}`, data);
+    return response.data;
+  } catch (error: any) {
+    throw error.response ? error.response.data : error;
+  }
+};
+
+// Get spin wheel reward winners (Admin only)
+export interface SpinWheelRewardWinnersQuery {
+  page?: number;
+  limit?: number;
+  wheelType?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export const getSpinWheelRewardWinnersRequest = async (
+  query: SpinWheelRewardWinnersQuery = {}
+) => {
+  try {
+    const params = new URLSearchParams();
+    if (query.page) params.set("page", String(query.page));
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.wheelType) params.set("wheelType", query.wheelType);
+    if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+    if (query.dateTo) params.set("dateTo", query.dateTo);
+
+    const qs = params.toString();
+    const url = qs
+      ? `${getSpinWheelRewardWinners}?${qs}`
+      : getSpinWheelRewardWinners;
+    const response = await api.get(url);
     return response.data;
   } catch (error: any) {
     throw error.response ? error.response.data : error;

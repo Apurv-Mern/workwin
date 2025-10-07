@@ -14,6 +14,7 @@ export const leaderBoard = "admin/leaderboard";
 export const xpRecords = "admin/users/xp-records";
 export const createReward = "admin/rewards/create";
 export const getRewards = "admin/rewards";
+export const getSpinWheelRewardWinners = "admin/rewards/spin-wheel-winners";
 export const updateReward = "admin/rewards";
 export const deleteReward = "admin/rewards";
 export const assignRewards = "admin/rewards/assign";

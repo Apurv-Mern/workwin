@@ -1,382 +1,296 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Tabs,
-  Tab,
-  Form,
   Button,
   Container,
   Row,
   Col,
   Table,
-  Image,
   Spinner,
+  Badge,
 } from "react-bootstrap";
-import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
-import {
-  createReward,
-  fetchRewards,
-  updateReward,
-  deleteReward,
-  assignRewards,
-} from "../store/slices/rewardSlice";
+import { useAppDispatch } from "../hooks/reduxHooks";
 import { FetchLeaderboard } from "../store/slices/userSlice";
 import { toast } from "react-toastify";
-import { usePermissions } from "../utils/handlePermissions";
-import EditRewardModal from "../components/EditRewardModal";
-import DeleteRewardModal from "../components/DeleteRewardModal";
+import { getSpinWheelRewardWinnersRequest } from "../store/Api/requests";
+import type { SpinWheelRewardWinnersQuery } from "../store/Api/requests";
 
 const Reward = () => {
-  const [key, setKey] = useState("current");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const { hasPermission } = usePermissions();
   const dispatch = useAppDispatch();
-  const { rewards, isLoading } = useAppSelector((state: any) => state.rewards);
-  const { leaderBoard } = useAppSelector((state: any) => state.users);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedReward, setSelectedReward] = useState<any>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [rewardToDelete, setRewardToDelete] = useState<any>(null);
-  const [selectedWinners, setSelectedWinners] = useState<
-    Record<string, string>
-  >({});
+
+  // Spin Wheel Winners State
+  const [spinWheelWinners, setSpinWheelWinners] = useState<any[]>([]);
+  const [winnersLoading, setWinnersLoading] = useState(false);
+  const [winnersQuery, setWinnersQuery] = useState<SpinWheelRewardWinnersQuery>(
+    {
+      page: 1,
+      limit: 10,
+    }
+  );
+  const [winnersPagination, setWinnersPagination] = useState<any>(null);
+  const [winnersFilters] = useState({
+    wheelType: "",
+    dateFrom: "",
+    dateTo: "",
+  });
 
   useEffect(() => {
-    dispatch(fetchRewards(key));
     dispatch(FetchLeaderboard());
-  }, [dispatch, key]);
+    // Load spin wheel winners on component mount
+    fetchSpinWheelWinners();
+  }, [dispatch]);
 
-  // Set initial selected winners when rewards are loaded
-  useEffect(() => {
-    if (rewards && rewards.length > 0) {
-      const initialWinners = rewards.reduce(
-        (acc: Record<string, string>, reward: any) => {
-          if (reward.winner_id) {
-            acc[reward.id] = reward.winner_id;
-          }
-          return acc;
-        },
-        {}
-      );
-      setSelectedWinners(initialWinners);
-    }
-  }, [rewards]);
+  // Fetch spin wheel winners function
+  const fetchSpinWheelWinners = async () => {
+    setWinnersLoading(true);
+    try {
+      const query = {
+        ...winnersQuery,
+        ...winnersFilters,
+      };
+      const response = await getSpinWheelRewardWinnersRequest(query);
+      console.log("API Response:", response); // Debug log
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
-    }
-  };
-
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setName(e.target.value);
-  };
-
-  const handleDescriptionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setDescription(e.target.value);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = {
-      name,
-      description,
-      reward_state: key,
-      file: selectedFile,
-    };
-    const res = await dispatch(createReward(payload));
-    if (createReward.fulfilled.match(res)) {
-      toast.success("Reward created successfully");
-      setName("");
-      setDescription("");
-      setSelectedFile(null);
-      dispatch(fetchRewards(key));
+      // Handle the API response structure: response.result.success and response.result.data
+      if (response.flag && response.result && response.result.success) {
+        setSpinWheelWinners(response.result.data || []);
+        setWinnersPagination(response.result.pagination);
+      } else {
+        toast.error("Failed to fetch spin wheel winners");
+      }
+    } catch (error) {
+      console.error("Error fetching spin wheel winners:", error);
+      toast.error("Error fetching spin wheel winners");
+    } finally {
+      setWinnersLoading(false);
     }
   };
 
-  const handleEditReward = (reward: any) => {
-    setSelectedReward(reward);
-    setShowEditModal(true);
+  const handleWinnersPageChange = (page: number) => {
+    setWinnersQuery((prev) => ({ ...prev, page }));
+    fetchSpinWheelWinners();
   };
 
-  const handleSaveEdit = async (updatedReward: any) => {
-    const res = await dispatch(updateReward(updatedReward));
-    if (updateReward.fulfilled.match(res)) {
-      toast.success("Reward updated successfully");
-      dispatch(fetchRewards(key));
-    } else {
-      toast.error("Failed to update reward");
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  const formatWheelType = (type: string) => {
+    if (
+      type.includes("small") ||
+      type.includes("mini") ||
+      type.includes("pixie")
+    ) {
+      return <Badge bg="info">Pixie Wheel</Badge>;
+    } else if (type.includes("big") || type.includes("dragon")) {
+      return <Badge bg="warning">Dragon Wheel</Badge>;
     }
-  };
-
-  const handleDeleteReward = (reward: any) => {
-    setRewardToDelete(reward);
-    setShowDeleteModal(true);
-  };
-
-  const handleConfirmDelete = async (reward: any) => {
-    console.log({ reward });
-    const res = await dispatch(deleteReward(reward.id));
-    if (deleteReward.fulfilled.match(res)) {
-      toast.success("Reward deleted successfully");
-      dispatch(fetchRewards(key));
-    } else {
-      toast.error("Failed to delete reward");
-    }
-    setShowDeleteModal(false);
-    setRewardToDelete(null);
-  };
-
-  const handleWinnerSelect = async (rewardId: string, userId: string) => {
-    console.log({ rewardId, userId });
-    setSelectedWinners((prev) => ({
-      ...prev,
-      [rewardId]: userId,
-    }));
-
-    await handleSaveWinner(rewardId, userId || null);
-  };
-
-  const handleSaveWinner = async (rewardId: string, userId: string | null) => {
-    const payload = {
-      userId,
-      rewardId,
-    };
-
-    const res = await dispatch(assignRewards(payload));
-    if (assignRewards.fulfilled.match(res)) {
-      toast.success(
-        userId
-          ? "Reward assigned successfully"
-          : "Reward unassigned successfully"
-      );
-      dispatch(fetchRewards(key));
-    } else {
-      toast.error("Failed to update reward assignment");
-    }
+    return <Badge bg="secondary">{type}</Badge>;
   };
 
   return (
     <Container className="py-4">
-      <h2 className="mb-4">Rewards</h2>
-      {hasPermission("reward.create") && (
-        <Form onSubmit={handleSubmit} className="mb-4">
-          <Row className="g-3 align-items-end">
-            <Col md={4}>
-              <Form.Group controlId="formName">
-                <Form.Label>Name</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="Enter name"
-                  value={name}
-                  onChange={handleNameChange}
-                  required
-                />
-              </Form.Group>
-            </Col>
-            <Col md={4}>
-              <Form.Group controlId="formDescription">
-                <Form.Label>Description</Form.Label>
-                <Form.Control
-                  type="text"
-                  placeholder="Enter description"
-                  value={description}
-                  onChange={handleDescriptionChange}
-                  required
-                />
-              </Form.Group>
-            </Col>
-            <Col md={4}>
-              <Form.Group controlId="formFile">
-                <Form.Label>Choose Image</Form.Label>
-                <Form.Control
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                />
-              </Form.Group>
-            </Col>
-            <Col md={2}>
-              <Button type="submit" variant="primary" className="w-100 mt-2">
-                Submit
-              </Button>
-            </Col>
-          </Row>
-        </Form>
+      {/* <h2 className="mb-4">Spin Wheel Reward Winners</h2> */}
+
+      {/* Header with Help Button */}
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h4 className="mb-0">
+          <i className="bi bi-trophy me-2"></i>
+          Spin Wheel Reward Winners
+        </h4>
+        <div className="d-flex gap-2">
+          <Button
+            variant="outline-primary"
+            size="sm"
+            onClick={fetchSpinWheelWinners}
+            disabled={winnersLoading}
+          >
+            <i className="bi bi-arrow-clockwise me-2"></i>
+            {winnersLoading ? "Refreshing..." : "Refresh"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      {/* <Row className="mb-4">
+        <Col md={12}>
+          <div className="bg-light p-3 rounded">
+            <h6 className="mb-3">🔍 Filter Options</h6>
+            <Row className="g-3">
+              <Col md={3}>
+                <Form.Group>
+                  <Form.Label>Wheel Type</Form.Label>
+                  <Form.Select
+                    value={winnersFilters.wheelType}
+                    onChange={(e) =>
+                      handleWinnersFilterChange("wheelType", e.target.value)
+                    }
+                  >
+                    <option value="">All Wheels</option>
+                    <option value="small">Pixie Wheel</option>
+                    <option value="big">Dragon Wheel</option>
+                  </Form.Select>
+                </Form.Group>
+              </Col>
+              <Col md={3}>
+                <Form.Group>
+                  <Form.Label>Date From</Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={winnersFilters.dateFrom}
+                    onChange={(e) =>
+                      handleWinnersFilterChange("dateFrom", e.target.value)
+                    }
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={3}>
+                <Form.Group>
+                  <Form.Label>Date To</Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={winnersFilters.dateTo}
+                    onChange={(e) =>
+                      handleWinnersFilterChange("dateTo", e.target.value)
+                    }
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={3} className="d-flex align-items-end">
+                <div className="d-flex gap-2 w-100">
+                  <Button
+                    variant="primary"
+                    onClick={handleWinnersSearch}
+                    className="flex-grow-1"
+                  >
+                    <i className="bi bi-search me-2"></i>Search
+                  </Button>
+                  <Button
+                    variant="outline-secondary"
+                    onClick={clearWinnersFilters}
+                    title="Clear all filters"
+                  >
+                    <i className="bi bi-arrow-clockwise"></i>
+                  </Button>
+                </div>
+              </Col>
+            </Row>
+          </div>
+        </Col>
+      </Row> */}
+
+      {/* Winners Table */}
+      {winnersLoading ? (
+        <div className="text-center py-4">
+          <Spinner animation="border" />
+          <div className="mt-2">Loading spin wheel winners...</div>
+        </div>
+      ) : spinWheelWinners && spinWheelWinners.length > 0 ? (
+        <>
+          <Table striped bordered hover responsive>
+            <thead>
+              <tr>
+                <th>Winner</th>
+                <th>Reward</th>
+                <th>Wheel Type</th>
+                <th>Date Won</th>
+                {/* <th>XP Earned</th> */}
+              </tr>
+            </thead>
+            <tbody>
+              {spinWheelWinners.map((winner: any, idx: number) => (
+                <tr key={winner.id || idx}>
+                  <td>
+                    <div>
+                      <strong>{winner.user_name}</strong>
+                      <br />
+                      <small className="text-muted">{winner.user_email}</small>
+                    </div>
+                  </td>
+                  <td>
+                    <div>
+                      <strong>{winner.reward_value}</strong>
+                      <br />
+                      <small className="text-muted">{winner.description}</small>
+                      <br />
+                      <Badge bg="success">Reward</Badge>
+                    </div>
+                  </td>
+                  <td>{formatWheelType(winner.type)}</td>
+                  <td>{formatDate(winner.date)}</td>
+                  {/* <td>
+                    <Badge bg="primary">{winner.xp_earned} XP</Badge>
+                  </td> */}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+
+          {/* Pagination */}
+          {winnersPagination && (
+            <Row className="mt-3">
+              <Col md={6}>
+                <div className="d-flex align-items-center">
+                  <span className="text-muted">
+                    Showing{" "}
+                    {(winnersPagination.currentPage - 1) *
+                      winnersPagination.pageSize +
+                      1}{" "}
+                    to{" "}
+                    {Math.min(
+                      winnersPagination.currentPage *
+                        winnersPagination.pageSize,
+                      winnersPagination.totalRecords
+                    )}{" "}
+                    of {winnersPagination.totalRecords} results
+                  </span>
+                </div>
+              </Col>
+              <Col md={6}>
+                <div className="d-flex justify-content-end">
+                  <div className="d-flex gap-2">
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      disabled={!winnersPagination.hasPreviousPage}
+                      onClick={() =>
+                        handleWinnersPageChange(
+                          winnersPagination.currentPage - 1
+                        )
+                      }
+                    >
+                      <i className="bi bi-chevron-left"></i> Previous
+                    </Button>
+                    <span className="align-self-center px-2">
+                      Page {winnersPagination.currentPage} of{" "}
+                      {winnersPagination.totalPages}
+                    </span>
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      disabled={!winnersPagination.hasNextPage}
+                      onClick={() =>
+                        handleWinnersPageChange(
+                          winnersPagination.currentPage + 1
+                        )
+                      }
+                    >
+                      Next <i className="bi bi-chevron-right"></i>
+                    </Button>
+                  </div>
+                </div>
+              </Col>
+            </Row>
+          )}
+        </>
+      ) : (
+        <div className="text-center py-5">
+          <div className="text-muted">
+            <i className="bi bi-trophy display-1 d-block mb-3"></i>
+            <h5>No winners found</h5>
+            <p>No spin wheel reward winners match your current filters.</p>
+          </div>
+        </div>
       )}
-
-      <Tabs
-        id="reward-tabs"
-        activeKey={key}
-        onSelect={(k) => setKey(k || "current")}
-        className="mb-3"
-      >
-        <Tab eventKey="current" title="Current Rewards">
-          <div className="p-3">
-            {isLoading ? (
-              <div className="text-center py-4">
-                <Spinner animation="border" />
-              </div>
-            ) : rewards && rewards.length > 0 ? (
-              <Table striped bordered hover responsive>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Image</th>
-                    <th>Edit</th>
-                    <th>Delete</th>
-                    <th>Select Winner</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rewards.map((reward: any, idx: number) => (
-                    <tr key={reward.id || idx}>
-                      <td>{reward.name}</td>
-                      <td>{reward.description}</td>
-
-                      <td>
-                        {reward.filename ? (
-                          <Image
-                            src={reward.filename}
-                            alt={reward.name}
-                            thumbnail
-                            style={{ maxWidth: 100 }}
-                          />
-                        ) : (
-                          <span className="text-muted">No image</span>
-                        )}
-                      </td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant="outline-primary"
-                          onClick={() => handleEditReward(reward)}
-                        >
-                          Edit
-                        </Button>
-                      </td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant="outline-danger"
-                          onClick={() => handleDeleteReward(reward)}
-                        >
-                          Delete
-                        </Button>
-                      </td>
-                      <td>
-                        <Form.Select
-                          size="sm"
-                          value={selectedWinners[reward.id] || ""}
-                          onChange={(e) =>
-                            handleWinnerSelect(reward.id, e.target.value)
-                          }
-                        >
-                          <option value="">Select Winner</option>
-                          {leaderBoard?.map((user: any) => (
-                            <option key={user.id} value={user.id}>
-                              {user.name} ({user.totalUserXp} XP)
-                            </option>
-                          ))}
-                        </Form.Select>
-                        {reward.winner_id && (
-                          <small className="text-muted">
-                            Current Winner:{" "}
-                            {
-                              leaderBoard?.find(
-                                (user: any) => user.id === reward.winner_id
-                              )?.name
-                            }
-                          </small>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            ) : (
-              <div className="text-muted">No rewards found.</div>
-            )}
-          </div>
-        </Tab>
-
-        <Tab eventKey="upcoming" title="Upcoming Rewards">
-          <div className="p-3">
-            {isLoading ? (
-              <div className="text-center py-4">
-                <Spinner animation="border" />
-              </div>
-            ) : rewards && rewards.length > 0 ? (
-              <Table striped bordered hover responsive>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Image</th>
-                    <th>Edit</th>
-                    <th>Delete</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rewards.map((reward: any, idx: number) => (
-                    <tr key={reward.id || idx}>
-                      <td>{reward.name}</td>
-                      <td>{reward.description}</td>
-                      <td>
-                        {reward.filename ? (
-                          <Image
-                            src={reward.filename}
-                            alt={reward.name}
-                            thumbnail
-                            style={{ maxWidth: 100 }}
-                          />
-                        ) : (
-                          <span className="text-muted">No image</span>
-                        )}
-                      </td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant="outline-primary"
-                          onClick={() => handleEditReward(reward)}
-                        >
-                          Edit
-                        </Button>
-                      </td>
-                      <td>
-                        <Button
-                          size="sm"
-                          variant="outline-danger"
-                          onClick={() => handleDeleteReward(reward)}
-                        >
-                          Delete
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            ) : (
-              <div className="text-muted">No rewards found.</div>
-            )}
-          </div>
-        </Tab>
-      </Tabs>
-
-      <EditRewardModal
-        show={showEditModal}
-        onHide={() => setShowEditModal(false)}
-        reward={selectedReward}
-        onSave={handleSaveEdit}
-      />
-      <DeleteRewardModal
-        show={showDeleteModal}
-        onHide={() => setShowDeleteModal(false)}
-        reward={rewardToDelete}
-        onDelete={handleConfirmDelete}
-      />
     </Container>
   );
 };
