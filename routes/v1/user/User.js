@@ -1017,7 +1017,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
   }
 });
 
-// GET /user/leatherboard
+// GET /user/leaderboard
 router.get('/leaderboard', userAuthMiddleware, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -1038,16 +1038,8 @@ router.get('/leaderboard', userAuthMiddleware, async (req, res) => {
 
     // Fetch ALL users with the same employer code, having 'User' role, ordered by XP
     const leaderboardUsers = await Users.findAll({
-      include: [{
-        model: Roles,
-        as: 'Roles',
-        where: { name: 'User' },
-        through: { attributes: [] },
-        attributes: [] // Don't return Roles in result
-      }],
       where: {
-        userCode: employerCode // Filter by same employer code
-        // Removed the limit to get ALL users
+        userCode: employerCode
       },
       attributes: [
         'id',
@@ -1059,11 +1051,12 @@ router.get('/leaderboard', userAuthMiddleware, async (req, res) => {
         'createdAt'
       ],
       order: [
-        ['totalUserXp', 'DESC'], // Primary sort: highest XP first
-        ['createdAt', 'ASC']     // Tiebreaker: earlier registration wins
+        ['totalUserXp', 'DESC'],
+        ['createdAt', 'ASC']
       ]
-      // No limit - get all users
     });
+
+    console.log({ leaderboardUsers })
 
     // Add ranking position to each user
     const rankedUsers = leaderboardUsers.map((user, index) => ({
@@ -1078,30 +1071,9 @@ router.get('/leaderboard', userAuthMiddleware, async (req, res) => {
       joinedDate: user.createdAt
     }));
 
-    // Find current user's position in the leaderboard
-    const currentUserRank = rankedUsers.findIndex(user => user.id === userId) + 1;
-
-    // Get current user's data from the leaderboard
-    const currentUserData = rankedUsers.find(user => user.id === userId);
-
-    // Statistics
-    const stats = {
-      totalUsers: rankedUsers.length,
-      topXP: rankedUsers.length > 0 ? rankedUsers[0].totalUserXp : 0,
-      averageXP: rankedUsers.length > 0
-        ? Math.round(rankedUsers.reduce((sum, user) => sum + user.totalUserXp, 0) / rankedUsers.length)
-        : 0,
-      usersWithXP: rankedUsers.filter(user => user.totalUserXp > 0).length
-    };
-
     res.status(200).send(
       HelperUtils.successObj("Leaderboard fetched successfully", {
         employerCode: employerCode,
-        currentUser: {
-          rank: currentUserRank || null,
-          data: currentUserData || null
-        },
-        statistics: stats,
         leaderboard: rankedUsers
       })
     );
@@ -1980,6 +1952,116 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
     return res.status(500).send(
       HelperUtils.errorObj("Failed to award spin wheel XP")
     );
+  }
+});
+
+// Get Global Highscores for All Games
+router.get("/global-highscores", userAuthMiddleware, async (req, res) => {
+  try {
+    const { gameType } = req.query;
+
+    // Build where clause for games with scores
+    const whereClause = {
+      source: 'game',
+      score: {
+        [Op.not]: null,
+        [Op.gt]: 0
+      }
+    };
+
+    // Filter by specific game type if provided
+    if (gameType) {
+      whereClause.type = gameType;
+    }
+
+    // Get global highscores - highest score per user per game type
+    const globalHighscores = await UserXpLog.findAll({
+      attributes: [
+        'userId',
+        'type',
+        [sequelize.fn('MAX', sequelize.col('score')), 'maxScore'],
+        [sequelize.fn('MAX', sequelize.col('highscore')), 'maxHighscore'],
+      ],
+      where: whereClause,
+      group: ['userId', 'type'],
+      order: [[sequelize.fn('MAX', sequelize.col('score')), 'DESC']],
+      raw: true
+    });
+
+    // Get user details for the highscore holders
+    const userIds = [...new Set(globalHighscores.map(score => score.userId))];
+    const users = await Users.findAll({
+      where: {
+        id: {
+          [Op.in]: userIds
+        }
+      },
+      attributes: ['id', 'name', 'email', 'userCode']
+    });
+
+    // Create user map for quick lookup
+    const userMap = {};
+    users.forEach(user => {
+      userMap[user.id] = user;
+    });
+
+    // Format the response with user details
+    // const formattedHighscores = globalHighscores.map((record, index) => {
+    //   const user = userMap[record.userId];
+    //   return {
+    //     userId: record.userId,
+    //     userName: user ? user.name : 'Unknown User',
+    //     userEmail: user ? user.email : 'Unknown',
+    //     userCode: user ? user.userCode : 'Unknown',
+    //     gameType: record.type,
+    //     highscore: record.maxHighscore || record.maxScore,
+    //     score: record.maxScore,
+    //   };
+    // });
+
+    const gameStats = await UserXpLog.findAll({
+      attributes: [
+        'type',
+        [sequelize.fn('COUNT', sequelize.fn('DISTINCT', sequelize.col('userId'))), 'uniquePlayers'],
+        [sequelize.fn('MAX', sequelize.col('score')), 'topScore'],
+        [sequelize.fn('AVG', sequelize.col('score')), 'averageScore'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'totalPlays']
+      ],
+      where: {
+        source: 'game',
+        score: {
+          [Op.not]: null,
+          [Op.gt]: 0
+        }
+      },
+      group: ['type'],
+      order: [[sequelize.fn('MAX', sequelize.col('score')), 'DESC']],
+      raw: true
+    });
+
+    const highScoreForGame = gameStats.find((game) => game.type === gameType);
+
+    res.status(200).send({
+      flag: true,
+      message: "Global highscores fetched successfully",
+      result: {
+        highscore: highScoreForGame,
+        gameStats: gameStats.map(stat => ({
+          gameType: stat.type,
+          uniquePlayers: parseInt(stat.uniquePlayers),
+          topScore: parseInt(stat.topScore),
+          averageScore: Math.round(parseFloat(stat.averageScore) || 0),
+          totalPlays: parseInt(stat.totalPlays)
+        })),
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching global highscores:", error);
+    res.status(500).send({
+      flag: false,
+      message: "Failed to fetch global highscores",
+      result: null
+    });
   }
 });
 
