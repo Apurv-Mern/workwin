@@ -7,6 +7,7 @@ import PublicRoute from "./PublicRoute";
 // Lazy load the components
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Login = lazy(() => import("../pages/Login"));
+const ResetPassword = lazy(() => import("../pages/ResetPassword"));
 const Users = lazy(() => import("../pages/Users"));
 const RoleManagement = lazy(() => import("../pages/RoleManagement"));
 const XpSystem = lazy(() => import("../pages/XpSystem"));
@@ -39,6 +40,7 @@ const AppRoutes = () => {
             </PublicRoute>
           }
         />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Protected routes with AdminLayout */}
         <Route

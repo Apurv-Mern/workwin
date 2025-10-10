@@ -369,9 +369,9 @@ const BonusSeason = () => {
                         <option value="">Choose season...</option>
                         <option value="easter">Easter</option>
                         <option value="christmas">Christmas</option>
-                        <option value="summer">Summer</option>
+                        {/* <option value="summer">Summer</option>
                         <option value="winter">Winter</option>
-                        <option value="custom">Custom</option>
+                        <option value="custom">Custom</option> */}
                       </Form.Select>
                       <Form.Text className="text-muted">
                         Select the type of seasonal bonus

@@ -18,7 +18,6 @@ import {
   getXpThresholdsRequest,
   createXpThresholdRequest,
   updateXpThresholdRequest,
-  deleteXpThresholdRequest,
   getGameTypesRequest,
   createSpecificThresholdRequest,
   getLoginRegistrationThresholdsRequest,
@@ -249,21 +248,6 @@ const XpThresholds = () => {
     setShowModal(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm("Are you sure you want to delete this XP threshold?")) {
-      return;
-    }
-
-    try {
-      await deleteXpThresholdRequest(id);
-      showNotification("XP threshold deleted successfully!");
-      loadXpThresholds();
-    } catch (error: any) {
-      console.error("Failed to delete XP threshold:", error);
-      showNotification("Failed to delete XP threshold", "danger");
-    }
-  };
-
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingItem(null);
@@ -343,7 +327,7 @@ const XpThresholds = () => {
                 requirements
               </p>
             </div>
-            <div className="d-flex gap-2">
+            {/* <div className="d-flex gap-2">
               <Button
                 variant="success"
                 onClick={() => setShowCreateThresholdModal(true)}
@@ -352,7 +336,7 @@ const XpThresholds = () => {
                 <i className="bi bi-plus-circle me-2"></i>
                 Create Threshold
               </Button>
-            </div>
+            </div> */}
           </div>
         </Col>
       </Row>
@@ -415,13 +399,6 @@ const XpThresholds = () => {
                             onClick={() => handleEdit(threshold)}
                           >
                             <i className="bi bi-pencil"></i>
-                          </Button>
-                          <Button
-                            variant="outline-danger"
-                            size="sm"
-                            onClick={() => handleDelete(threshold.id)}
-                          >
-                            <i className="bi bi-trash"></i>
                           </Button>
                         </td>
                       </tr>
@@ -497,13 +474,13 @@ const XpThresholds = () => {
                           >
                             <i className="bi bi-pencil"></i>
                           </Button>
-                          <Button
+                          {/* <Button
                             variant="outline-danger"
                             size="sm"
                             onClick={() => handleDelete(threshold.id)}
                           >
                             <i className="bi bi-trash"></i>
-                          </Button>
+                          </Button> */}
                         </td>
                       </tr>
                     ))}
