@@ -1,5 +1,4 @@
 const router = require("express").Router();
-const moment = require("moment");
 const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
@@ -14,16 +13,9 @@ const jwt = require("jsonwebtoken");
 const JWT_SECRET = config.get("jwtSecret");
 const { Sequelize, Op } = require('sequelize');
 const userAuthMiddleware = require("../../../middleware/userAuthMiddleware");
-const fs = require("fs/promises");
-const path = require("path");
-const { DateTime } = require("luxon");
 const multer = require("multer");
-const fsData = require("fs");
-const axios = require("axios");
-const FormData = require("form-data");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
-// const ExcelJS = require("exceljs");
 
 
 const upload = multer({
@@ -211,9 +203,10 @@ router.post('/user_login', async (req, res) => {
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth() + 1; // 1-12
+    // Calculate week start (Sunday) using UTC to avoid timezone issues
     const currentWeekStart = new Date(currentDate);
-    currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
-    currentWeekStart.setHours(0, 0, 0, 0);
+    currentWeekStart.setUTCDate(currentDate.getUTCDate() - currentDate.getUTCDay()); // Set to Sunday using UTC
+    currentWeekStart.setUTCHours(0, 0, 0, 0);
     const weekStartDateStr = currentWeekStart.toISOString().split('T')[0];
 
     // Check if user has already received login XP for this week in current month
@@ -373,31 +366,45 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
     userData.token = token;
 
-    // Get user's total XP from EmployeeXpResults or UserLevel
-    let totalUserXp = 0;
-    let currentLevel = 1;
+    // Priority 1: Get XP and level data from users table (as per memory specification)
+    let totalUserXp = userDetails.totalUserXp || 0;
+    let currentLevel = userDetails.curr_levels || 1;
     let currentStreak = 0;
 
-    // First, try to get from EmployeeXpResults (most recent)
+    console.log(`/me API - User ${userDetails.userCode}: Initial data from users table - XP: ${totalUserXp}, Level: ${currentLevel}`);
+
+    // Priority 2: Get streak from EmployeeXpResults (attendance-specific data)
     const empXpResult = await EmployeeXpResults.findOne({
       where: { emp_code: userDetails.userCode },
       order: [['week_start_date', 'DESC']]
     });
 
     if (empXpResult) {
-      totalUserXp = empXpResult.total_xp || 0;
-      currentLevel = empXpResult.current_level || 1;
       currentStreak = empXpResult.current_streak || 0;
+      console.log(`/me API - User ${userDetails.userCode}: Found EmployeeXpResults - Streak: ${currentStreak}, XP: ${empXpResult.total_xp || 0}`);
+      // Only use EmployeeXpResults data as fallback if users table has no data
+      if (totalUserXp === 0 && currentLevel === 1) {
+        totalUserXp = empXpResult.total_xp || 0;
+        currentLevel = empXpResult.current_level || 1;
+        console.log(`/me API - User ${userDetails.userCode}: Using EmployeeXpResults as fallback - XP: ${totalUserXp}, Level: ${currentLevel}`);
+      }
     } else {
-      // Fallback to UserLevel table
+      console.log(`/me API - User ${userDetails.userCode}: No EmployeeXpResults found`);
+    }
+
+    // Priority 3: Fallback to UserLevel table if both users table and EmployeeXpResults have no data
+    if (totalUserXp === 0 && currentLevel === 1) {
       const userLevel = await UserLevel.findOne({
         where: { userId: user_id }
       });
       if (userLevel) {
         totalUserXp = userLevel.totalXp || 0;
         currentLevel = userLevel.level || 1;
+        console.log(`/me API - User ${userDetails.userCode}: Using UserLevel as fallback - XP: ${totalUserXp}, Level: ${currentLevel}`);
       }
     }
+
+    console.log(`/me API - User ${userDetails.userCode}: Final data - XP: ${totalUserXp}, Level: ${currentLevel}, Streak: ${currentStreak}`);
 
     // Calculate dynamic level based on XP if needed
     const calculatedLevel = xpBadgeSystem.calculateLevel(totalUserXp);
@@ -407,8 +414,7 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     const badgeProgress = xpBadgeSystem.getBadgeProgress(totalUserXp);
     const earnedBadges = xpBadgeSystem.getEarnedBadges(totalUserXp);
 
-    // // Streak badges system
-
+    // Streak badges system - only for users with actual streaks
     const currentStreakBadge = getStreakBadge(currentStreak);
 
     // Get unlocked seasons
@@ -455,46 +461,46 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
       unlockedSeasons: unlockedSeasons.length,
       totalSeasons: GetAllSeasonsData.length,
       // Streak information
-
+      currentStreak: currentStreak,
+      currentStreakBadge: currentStreakBadge
     };
 
     // Keep existing badges structure for backward compatibility
+    userData.badges = badgeProgress.currentBadge;
+    userData.currentStreakBadge = currentStreakBadge;
+    // nextStreakBadge: nextStreakBadge.id !== currentStreakBadge.id ? nextStreakBadge : null,
+    // streakProgress: currentStreak >= currentStreakBadge.streakRequired ?
+    //   100 : Math.round((currentStreak / currentStreakBadge.streakRequired) * 100)
 
-    userData.badges = badgeProgress.currentBadge
-    userData.currentStreakBadge = currentStreakBadge,
-      // nextStreakBadge: nextStreakBadge.id !== currentStreakBadge.id ? nextStreakBadge : null,
-      // streakProgress: currentStreak >= currentStreakBadge.streakRequired ?
-      //   100 : Math.round((currentStreak / currentStreakBadge.streakRequired) * 100)
+    // userData.badges = earnedBadges.map((badge, index) => ({
+    //   id: badge.id,
+    //   level: badge.id,
+    //   name: badge.name,
+    //   title: badge.name,
+    //   description: badge.description,
+    //   xpRequired: badge.xpRequired,
+    //   iconUrl: badge.iconUrl,
+    //   status: "complete",
+    //   earnedAt: new Date(), // You might want to track this in the database
+    //   progress: 100
+    // }));
 
-      // userData.badges = earnedBadges.map((badge, index) => ({
-      //   id: badge.id,
-      //   level: badge.id,
-      //   name: badge.name,
-      //   title: badge.name,
-      //   description: badge.description,
-      //   xpRequired: badge.xpRequired,
-      //   iconUrl: badge.iconUrl,
-      //   status: "complete",
-      //   earnedAt: new Date(), // You might want to track this in the database
-      //   progress: 100
-      // }));
+    // Add current progress badge if not at max level
+    // if (!badgeProgress.isMaxLevel && badgeProgress.nextBadge) {
+    //   userData.badges.push({
+    //     id: badgeProgress.nextBadge.id,
+    //     level: badgeProgress.nextBadge.id,
+    //     name: badgeProgress.nextBadge.name,
+    //     title: badgeProgress.nextBadge.name,
+    //     description: badgeProgress.nextBadge.description,
+    //     xpRequired: badgeProgress.nextBadge.xpRequired,
+    //     iconUrl: badgeProgress.nextBadge.iconUrl,
+    //     status: "in_progress",
+    //     progress: badgeProgress.progress
+    //   });
+    // }
 
-      // Add current progress badge if not at max level
-      // if (!badgeProgress.isMaxLevel && badgeProgress.nextBadge) {
-      //   userData.badges.push({
-      //     id: badgeProgress.nextBadge.id,
-      //     level: badgeProgress.nextBadge.id,
-      //     name: badgeProgress.nextBadge.name,
-      //     title: badgeProgress.nextBadge.name,
-      //     description: badgeProgress.nextBadge.description,
-      //     xpRequired: badgeProgress.nextBadge.xpRequired,
-      //     iconUrl: badgeProgress.nextBadge.iconUrl,
-      //     status: "in_progress",
-      //     progress: badgeProgress.progress
-      //   });
-      // }
-
-      res.status(200).send(HelperUtils.successObj("User profile fetched", userData));
+    res.status(200).send(HelperUtils.successObj("User profile fetched", userData));
   } catch (error) {
     console.error("Error in user /me api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
@@ -635,8 +641,10 @@ router.post('/spin-wheel', userAuthMiddleware, async (req, res) => {
     }
 
     // Update EmployeeXpResults for attendance system integration
+    // Calculate week start (Sunday) using UTC to avoid timezone issues
     const weekStartDate = new Date(currentDate);
-    weekStartDate.setDate(currentDate.getDate() - currentDate.getDay()); // Get Sunday of current week
+    weekStartDate.setUTCDate(currentDate.getUTCDate() - currentDate.getUTCDay()); // Get Sunday of current week using UTC
+    weekStartDate.setUTCHours(0, 0, 0, 0);
 
     let empXpResult = await EmployeeXpResults.findOne({
       where: {
@@ -834,43 +842,54 @@ router.post('/change_password', userAuthMiddleware, async (req, res) => {
 });
 
 router.post('/forgot_password', async (req, res) => {
+
   const { email } = req.body;
+  console.log(email)
   if (!email) {
     return res.status(400).send(HelperUtils.errorObj("Email is required"));
   }
+  console.log(email)
+
   try {
     const user = await Users.findOne({ where: { email } });
+
     console.log("user find", user);
     if (!user) {
       return res.status(401).send(HelperUtils.errorObj("data not found"));
     }
 
     const resetToken = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '15m' });
-    const resetLink = `http://${req.get("host")}/reset-password?token=${resetToken}`;
+    const resetLink = `https://https://workwin.24livehost.com/reset-password?token=${resetToken}`;
 
+    // Send response immediately
+    res.status(200).send(HelperUtils.successObj("Password reset instruction sent to your mail id."));
+
+    // Send email asynchronously (fire and forget)
     const transporter = nodemailer.createTransport({
-      host: config.get("MAIL_HOST"),   // e.g., smtp.mailtrap.io, smtp.office365.com
-      port: config.get("MAIL_PORT"),   // or 465 if using secure SSL
-      secure: config.get("MAIL_PROTOCAL"), // true for port 465, false for 587
+      host: config.get("MAIL_HOST"),
+      port: config.get("MAIL_PORT"),
+      secure: config.get("MAIL_PROTOCAL"),
       auth: {
         user: config.get("MAIL_USERNAME"),
         pass: config.get("MAIL_PASSWORD")
       }
     });
 
-    await transporter.sendMail({
+    transporter.sendMail({
       from: `WorkWin Support <${config.get("MAIL_FORM")}>`,
       to: email,
       subject: "Password Reset Link",
       html: `<p>Click the link below to reset your password:</p><a href="${resetLink}">${resetLink}</a>`
+    }).catch(error => {
+      console.error("Error sending email:", error);
     });
 
-    return res.status(200).send(HelperUtils.successObj("Password reset instruction sent to your mail id."));
   } catch (error) {
     console.error("Error in user Forget password api:", error);
     return res.status(500).send(HelperUtils.errorObj("Something went wrong."));
   }
 });
+
 
 router.post('/reset_password_web', async (req, res) => {
   const { token, newPassword, confirmPassword } = req.body;
@@ -938,10 +957,50 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       return res.status(400).send(HelperUtils.errorObj("Missing or invalid gameType or XP"));
     }
 
+    // Extract game index from gameType (assuming format like 'game_0', 'game_1', etc.)
+    const gameMatch = gameType.match(/game[_]?(\d+)/);
+    const gameIndex = gameMatch ? parseInt(gameMatch[1]) : null;
+
+    // if (gameIndex === null) {
+    //   return res.status(400).send(HelperUtils.errorObj("Invalid gameType format"));
+    // }
+
+    // Verify user has unlocked this mini game
+    // Get user's current unlock status (simplified version of season dashboard logic)
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1; // 1-12
+    const currentWeekNumber = Math.ceil(currentDate.getDate() / 7);
+
+    // Get user's current streak to check spin wheel access
+    const userAttendance = await EmployeeXpResults.findOne({
+      where: {
+        emp_code: req.user.userCode || 'unknown'
+      },
+      order: [['week_start_date', 'DESC']],
+      attributes: ['current_streak']
+    });
+
+    const currentStreak = userAttendance?.current_streak || 0;
+    const hasSpinWheelAccess = currentStreak > 0 && currentStreak % 7 === 0;
+
+    // Define unlock logic based on memory specifications
+    const allMiniGames = [0, 1, 2, 3, 4];
+    const weekBasedUnlocked = allMiniGames.slice(0, currentWeekNumber);
+    const finalUnlockedGames = hasSpinWheelAccess ? allMiniGames : weekBasedUnlocked;
+
+    // Check if the requested game is unlocked
+    if (!finalUnlockedGames.includes(gameIndex)) {
+      return res.status(403).send(HelperUtils.errorObj(
+        `Game ${gameIndex} is not unlocked. Available games: [${finalUnlockedGames.join(', ')}]. ` +
+        `Unlock more games by reaching week ${gameIndex + 1} or achieving a streak multiple of 7.`
+      ));
+    }
+
     const today = new Date().toISOString().split('T')[0];
     // get active season name
     const season = await BonusSeason.getActiveSeason();
-    // Check daily play limit
+
+    // Check daily play limit for this specific game
     const todayPlays = await UserXpLog.count({
       where: {
         userId,
@@ -953,7 +1012,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
     });
 
     if (todayPlays >= 3) {
-      return res.status(403).send(HelperUtils.errorObj("Daily limit of 3 plays reached for this game."));
+      return res.status(403).send(HelperUtils.errorObj(`Daily limit of 3 plays reached for ${gameType}.`));
     }
 
     //  Check XP cap of 50
@@ -1195,6 +1254,7 @@ router.get("/rewards", userAuthMiddleware, async (req, res) => {
         'reward_value',
         'description',
         'date',
+        "rewardImageUrl"
       ],
       order: [['date', 'DESC']]
     });
@@ -1238,13 +1298,12 @@ router.get("/rewards", userAuthMiddleware, async (req, res) => {
     // Transform user won rewards to match the desired format
     const currentRewards = userRewardWins.map(reward => {
       const rewardValue = reward.reward_value;
-      const correspondingImage = rewardImageMap[rewardValue] || null;
-
+      const rewardImageUrl = reward.rewardImageUrl;
       return {
         id: reward.id,
         name: rewardValue,
         description: reward.description || `You won ${rewardValue}!`,
-        filename: correspondingImage,
+        filename: rewardImageUrl,
         dateWon: reward.date
       };
     });
@@ -1674,8 +1733,8 @@ router.get('/season/dashboard', async (req, res) => {
       spinTheWheelContents: spinWheelContents,
 
       // Games and bonuses
-      // miniGamesUnlocked: unlockedMiniGames,
-      miniGamesUnlocked: allMiniGames,
+      miniGamesUnlocked: unlockedMiniGames,
+      // miniGamesUnlocked: allMiniGames,
       seasonUnlocked,
 
       // Bonus season information
@@ -1756,7 +1815,7 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
 
   try {
     const userId = req.user.userId;
-    const { rewardValue, wheelType, sectionId, rewardType } = req.body;
+    const { rewardValue, wheelType, sectionId, rewardType, rewardImageUrl } = req.body;
 
     // Validation for reward type
     if (!rewardType || !['xp', 'reward'].includes(rewardType)) {
@@ -1852,7 +1911,8 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
       date: dateOnly,
       description: logDescription,
       reward_type: rewardType,
-      reward_value: rewardValue
+      reward_value: rewardValue,
+      rewardImageUrl,
     }, { transaction });
 
     // Update user level and badges only if XP is awarded

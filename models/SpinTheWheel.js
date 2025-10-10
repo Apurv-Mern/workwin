@@ -76,7 +76,7 @@ class SpinTheWheel extends Model {
                             }
                             return imagePath.startsWith('http')
                                 ? imagePath
-                                : `http://localhost:3008/workwin-backend${imagePath}`;
+                                : `https://workwin.24livehost.com:3025${imagePath}`;
                         });
 
                     } catch (error) {
@@ -85,12 +85,16 @@ class SpinTheWheel extends Model {
                     }
                 },
                 set(value) {
+                    console.log('SpinTheWheel reward_images setter called with:', value);
                     if (!value || (Array.isArray(value) && value.length === 0)) {
+                        console.log('Setting reward_images to null (empty)');
                         this.setDataValue('reward_images', null);
                     } else {
                         // Store as JSON string in database
                         const arrayValue = Array.isArray(value) ? value : [value];
-                        this.setDataValue('reward_images', JSON.stringify(arrayValue));
+                        const jsonString = JSON.stringify(arrayValue);
+                        console.log('Setting reward_images to:', jsonString);
+                        this.setDataValue('reward_images', jsonString);
                     }
                 }
             }

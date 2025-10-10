@@ -47,6 +47,10 @@ class UserXpLog extends Model {
       reward_value: {
         type: DataTypes.STRING,
         allowNull: true
+      },
+      rewardImageUrl: {
+        type: DataTypes.STRING,
+        allowNull: true
       }
     }, {
       sequelize,

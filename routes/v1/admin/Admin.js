@@ -30,7 +30,8 @@ const TOKEN_EXPIRY = "1d";
 const { Op } = require("sequelize");
 const upload = require("../../../middleware/fileUpload");
 const XLSX = require("xlsx");
-const c = require("config");
+const nodemailer = require("nodemailer");
+
 
 router.post("/admin_login", async (req, res) => {
   const { email, password } = req.body;
@@ -1617,14 +1618,16 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       };
     };
 
-    // Updated XP calculation with refined penalty logic
+    // Updated XP calculation with penalty based on missing days
     const calculateXP = (employeeData, multiplier = 1) => {
       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       const xpPerDay = 2500;
-      const penaltyXP = -1000;
+      const penaltyPerMissingDay = 1000; // Penalty is 1000 XP per missing day
       let baseXP = 0;
       let attendanceDetails = {};
       let perfectAttendance = true;
+      let daysPresent = 0;
+      let daysMissing = 0;
 
       days.forEach((day) => {
         const inTime = employeeData[`${day}_In`];
@@ -1632,11 +1635,13 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
 
         if (hasValue(inTime) && hasValue(outTime)) {
           baseXP += xpPerDay;
+          daysPresent++;
           attendanceDetails[day.toLowerCase()] = {
             present: true,
             hours: employeeData[`${day}_Hours`] || 0
           };
         } else {
+          daysMissing++;
           attendanceDetails[day.toLowerCase()] = {
             present: false,
             hours: 0
@@ -1648,14 +1653,14 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       // Apply multiplier to base XP
       let totalXP = baseXP * multiplier;
 
-      // Apply penalty ONLY if: not perfect attendance and has base XP
+      // Apply penalty: number of missing days * 1000
       let penaltyApplied = 0;
-      if (!perfectAttendance && baseXP > 0) {
-        totalXP += penaltyXP;
-        penaltyApplied = penaltyXP;
+      if (daysMissing > 0) {
+        penaltyApplied = daysMissing * penaltyPerMissingDay;
+        totalXP -= penaltyApplied;
       }
 
-      // Ensure XP cannot be negative
+      // Ensure XP cannot be negative - if negative, set to 0
       if (totalXP < 0) {
         totalXP = 0;
       }
@@ -1665,8 +1670,10 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         totalXP,
         attendanceDetails,
         perfectAttendance,
-        penaltyApplied,
-        multiplierUsed: multiplier
+        penaltyApplied: -penaltyApplied, // Show as negative for display purposes
+        multiplierUsed: multiplier,
+        daysPresent,
+        daysMissing
       };
     };
 
@@ -1906,29 +1913,183 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       }
     };
 
+    // Function to extract actual week dates from Excel data
+    const extractWeekDatesFromData = (rawData) => {
+      // Look for week_start_date and related columns in the first valid row
+      const firstRowWithWeekData = rawData.find(row =>
+        row.week_start_date || row.Week_Start_Date || row['Week Start Date'] ||
+        row.Sun_In || row.Mon_In || row.Tue_In // Also check for attendance date columns
+      );
+
+      if (firstRowWithWeekData) {
+        // Try to get week_start_date directly from the column
+        const weekStartRaw = firstRowWithWeekData.week_start_date ||
+          firstRowWithWeekData.Week_Start_Date ||
+          firstRowWithWeekData['Week Start Date'];
+
+        if (weekStartRaw) {
+          const formatDate = (dateValue) => {
+            if (!dateValue) return null;
+
+            // If it's already a date object
+            if (dateValue instanceof Date) {
+              return dateValue.toISOString().split('T')[0];
+            }
+
+            // If it's a string in DD-MM-YYYY format (like "28-09-2025 00:00")
+            if (typeof dateValue === 'string') {
+              // Handle DD-MM-YYYY HH:MM format
+              const ddmmyyyyMatch = dateValue.match(/(\d{2})-(\d{2})-(\d{4})/);
+              if (ddmmyyyyMatch) {
+                const [, day, month, year] = ddmmyyyyMatch;
+                // Create YYYY-MM-DD string directly without Date object to avoid timezone issues
+                const result = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                console.log(`Parsed Excel date: ${dateValue} -> ${result} (direct string conversion, no timezone offset)`);
+                return result;
+              }
+
+              // Try standard date parsing
+              const parsed = new Date(dateValue);
+              if (!isNaN(parsed.getTime())) {
+                return parsed.toISOString().split('T')[0];
+              }
+            }
+
+            // If it's an Excel serial number (common in Excel exports)
+            if (typeof dateValue === 'number' && dateValue > 40000) {
+              const excelEpoch = new Date(1900, 0, 1);
+              const date = new Date(excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000);
+              return date.toISOString().split('T')[0];
+            }
+
+            return null;
+          };
+
+          const weekStart = formatDate(weekStartRaw);
+          if (weekStart) {
+            // Use the week_start_date from Excel directly - don't recalculate
+            // The Excel already contains the correct week start date
+            const startDate = new Date(weekStart);
+            const weekEnd = new Date(startDate);
+            weekEnd.setDate(startDate.getDate() + 6);
+
+            return {
+              weekStart: weekStart, // Use exactly what's in the Excel
+              weekEnd: weekEnd.toISOString().split('T')[0],
+              source: 'excel_data'
+            };
+          }
+        }
+
+        // Fallback: try to derive from attendance date columns
+        // Look for Sun_In, Mon_In, etc. columns that contain dates
+        const attendanceDateColumns = ['Sun_In', 'Mon_In', 'Tue_In', 'Wed_In', 'Thu_In', 'Fri_In', 'Sat_In'];
+
+        for (const dateCol of attendanceDateColumns) {
+          const dateValue = firstRowWithWeekData[dateCol];
+          if (dateValue) {
+            const formatAttendanceDate = (dateValue) => {
+              if (!dateValue) return null;
+
+              // Handle DD-MM-YYYY HH:MM format (like "28-09-2025 05:20")
+              if (typeof dateValue === 'string') {
+                const ddmmyyyyMatch = dateValue.match(/(\d{2})-(\d{2})-(\d{4})/);
+                if (ddmmyyyyMatch) {
+                  const [, day, month, year] = ddmmyyyyMatch;
+                  // Create date using UTC to avoid timezone conversion issues
+                  const date = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
+                  if (!isNaN(date.getTime())) {
+                    console.log(`Parsed attendance date: ${dateValue} -> Day: ${date.getUTCDay()} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][date.getUTCDay()]})`);
+                    return date;
+                  }
+                }
+              }
+
+              // Try other formats
+              if (dateValue instanceof Date) {
+                return dateValue;
+              } else if (typeof dateValue === 'string') {
+                const parsed = new Date(dateValue);
+                if (!isNaN(parsed.getTime())) {
+                  return parsed;
+                }
+              } else if (typeof dateValue === 'number' && dateValue > 40000) {
+                const excelEpoch = new Date(1900, 0, 1);
+                return new Date(excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000);
+              }
+
+              return null;
+            };
+
+            const parsedDate = formatAttendanceDate(dateValue);
+            if (parsedDate) {
+              console.log(`Processing attendance date: ${dateValue}`);
+              console.log(`Parsed date: ${parsedDate.toISOString()} (Day of week: ${parsedDate.getDay()} - ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parsedDate.getDay()]})`);
+
+              // Calculate week start (Sunday) and end (Saturday) from this date using UTC
+              const weekStart = new Date(parsedDate);
+              const dayOfWeek = parsedDate.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+              weekStart.setUTCDate(parsedDate.getUTCDate() - dayOfWeek);
+              weekStart.setUTCHours(0, 0, 0, 0);
+
+              const weekEnd = new Date(weekStart);
+              weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+              weekEnd.setUTCHours(23, 59, 59, 999);
+
+              console.log(`Calculated week start: ${weekStart.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekStart.getUTCDay()]})`);
+              console.log(`Calculated week end: ${weekEnd.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekEnd.getUTCDay()]})`);
+
+              return {
+                weekStart: weekStart.toISOString().split('T')[0],
+                weekEnd: weekEnd.toISOString().split('T')[0],
+                source: 'derived_from_attendance_dates'
+              };
+            }
+          }
+        }
+      }
+
+      return null; // Could not extract dates from data
+    };
+
     const weekStartDate = req.body.weekStartDate || null;
     const weekEndDate = req.body.weekEndDate || null;
     const uploadedBy = req.user?.id || null;
 
-    // Auto-calculate week dates if not provided
+    // Try to extract actual week dates from Excel data first
+    const extractedDates = extractWeekDatesFromData(rawData);
+
+    // Determine final week dates with priority:
+    // 1. Explicit dates from request body
+    // 2. Dates extracted from Excel data
+    // 3. Auto-calculated current week dates (fallback)
     let calculatedWeekStart = weekStartDate;
     let calculatedWeekEnd = weekEndDate;
+    let dateSource = 'manual';
 
     if (!weekStartDate || !weekEndDate) {
-      const currentDate = new Date();
+      if (extractedDates) {
+        calculatedWeekStart = calculatedWeekStart || extractedDates.weekStart;
+        calculatedWeekEnd = calculatedWeekEnd || extractedDates.weekEnd;
+        dateSource = extractedDates.source;
+      } else {
+        // Fallback to auto-calculated current week dates
+        const currentDate = new Date();
 
-      // Calculate current week start (Sunday) and end (Saturday)
-      const autoWeekStart = new Date(currentDate);
-      autoWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
-      autoWeekStart.setHours(0, 0, 0, 0);
+        // Calculate current week start (Sunday) and end (Saturday) using UTC
+        const autoWeekStart = new Date(currentDate);
+        autoWeekStart.setUTCDate(currentDate.getUTCDate() - currentDate.getUTCDay()); // Set to Sunday using UTC
+        autoWeekStart.setUTCHours(0, 0, 0, 0);
 
-      const autoWeekEnd = new Date(autoWeekStart);
-      autoWeekEnd.setDate(autoWeekStart.getDate() + 6); // Set to Saturday
-      autoWeekEnd.setHours(23, 59, 59, 999);
+        const autoWeekEnd = new Date(autoWeekStart);
+        autoWeekEnd.setUTCDate(autoWeekStart.getUTCDate() + 6); // Set to Saturday using UTC
+        autoWeekEnd.setUTCHours(23, 59, 59, 999);
 
-      // Use auto-calculated dates if not provided
-      calculatedWeekStart = calculatedWeekStart || autoWeekStart.toISOString().split('T')[0];
-      calculatedWeekEnd = calculatedWeekEnd || autoWeekEnd.toISOString().split('T')[0];
+        // Use auto-calculated dates if not provided
+        calculatedWeekStart = calculatedWeekStart || autoWeekStart.toISOString().split('T')[0];
+        calculatedWeekEnd = calculatedWeekEnd || autoWeekEnd.toISOString().split('T')[0];
+        dateSource = 'auto_calculated';
+      }
     }
 
     const processedEmployees = [];
@@ -2105,6 +2266,30 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       emp.level_update?.badge_progress > 0
     ).length;
 
+    // // Send Mail
+    const transporter = nodemailer.createTransport({
+      host: config.get("MAIL_HOST"),
+      port: config.get("MAIL_PORT"),
+      secure: config.get("MAIL_PROTOCAL"),
+      auth: {
+        user: config.get("MAIL_USERNAME"),
+        pass: config.get("MAIL_PASSWORD")
+      }
+    });
+
+    transporter.sendMail({
+      from: `WorkWin Support <${config.get("MAIL_FORM")}>`,
+      to: "apurv.gupta@dotsquares.com",
+      subject: "WorkWin Attendance Update",
+      html: `<p>Attendance processed with automatic XP, level, and badge updates</p><p>Total employees: ${processedEmployees.length}</p><p>Total week  ly XP awarded: ${totalWeeklyXP}</p><p>Total season bonus awarded: ${totalSeasonBonus}</p><p>Employees with perfect week: ${employeesWithPerfectWeek}</p><p>Employees with season bonus: ${employeesWithSeasonBonus}</p><p>Week start date: ${calculatedWeekStart}</p><p>Week end date: ${calculatedWeekEnd}</p>`
+    }).then(() => {
+      console.log("Email sent successfully");
+    }).catch((error) => {
+      console.error("Error sending email:", error);
+    });
+
+
+
     res.status(200).json({
       success: true,
       message: "Attendance processed with automatic XP, level, and badge updates",
@@ -2116,7 +2301,14 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         employeesWithSeasonBonus: employeesWithSeasonBonus,
         weekStartDate: calculatedWeekStart,
         weekEndDate: calculatedWeekEnd,
-        datesAutoCalculated: !weekStartDate || !weekEndDate
+        dateSource: dateSource, // Shows how dates were determined
+        dateSourceExplanation: {
+          manual: "Week dates provided in request body",
+          excel_data: "Week dates extracted from Excel sheet columns",
+          derived_from_attendance_dates: "Week dates calculated from attendance date columns in Excel",
+          auto_calculated: "Week dates auto-calculated based on upload time (may be inaccurate for historical data)"
+        }[dateSource],
+        datesAutoCalculated: dateSource === 'auto_calculated'
       },
       badgeAndLevelSummary: {
         employeesWhoLeveledUp: employeesWhoLeveledUp,
@@ -2327,74 +2519,178 @@ router.post("/users/update-badges-levels", adminAuthMiddleware, async (req, res)
 // Get ExcelAttendence Data
 router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
   try {
+    await sequelize.query("SET sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
     const offset = (page - 1) * pageSize;
 
-    // Auto-calculate week dates
-    const currentDate = new Date();
+    // Build where clause filters - use actual data week dates, not current system week
+    const whereConditions = [];
+    const queryParams = [];
 
-    // Calculate current week start (Sunday) and end (Saturday)
-    const currentWeekStart = new Date(currentDate);
-    currentWeekStart.setDate(currentDate.getDate() - currentDate.getDay()); // Set to Sunday
-    currentWeekStart.setHours(0, 0, 0, 0);
-
-    const currentWeekEnd = new Date(currentWeekStart);
-    currentWeekEnd.setDate(currentWeekStart.getDate() + 6); // Set to Saturday
-    currentWeekEnd.setHours(23, 59, 59, 999);
-
-    // Convert to YYYY-MM-DD format for database comparison
-    const weekStartDateStr = currentWeekStart.toISOString().split('T')[0];
-    const weekEndDateStr = currentWeekEnd.toISOString().split('T')[0];
-
-    // Optional filters
-    const whereClause = {};
-    if (req.query.location) whereClause.location = { [Op.like]: `%${req.query.location}%` };
-    if (req.query.client) whereClause.client = { [Op.like]: `%${req.query.client}%` };
-
-    // Use auto-calculated week_start_date instead of query parameter
-    if (req.query.week_start_date) {
-      // If specific week_start_date is provided, use it
-      whereClause.week_start_date = req.query.week_start_date;
-    } else {
-      // Otherwise, filter for current week
-      whereClause.week_start_date = {
-        [Op.gte]: weekStartDateStr,
-        [Op.lte]: weekEndDateStr
-      };
+    if (req.query.location) {
+      whereConditions.push(`location LIKE ?`);
+      queryParams.push(`%${req.query.location}%`);
     }
 
-    const { count, rows } = await EmployeeXpResults.findAndCountAll({
-      where: whereClause,
-      limit: pageSize,
-      offset: offset,
-      order: [['total_xp', 'DESC']],
+    if (req.query.client) {
+      whereConditions.push(`client LIKE ?`);
+      queryParams.push(`%${req.query.client}%`);
+    }
+
+    // Handle week filtering - use actual week_start_date from data, not current week
+    let weekInfo = null;
+    if (req.query.week_start_date) {
+      // Use specific week provided
+      whereConditions.push(`week_start_date = ?`);
+      queryParams.push(req.query.week_start_date);
+
+      // Get week info for the specified week
+      const weekInfoQuery = `
+        SELECT week_start_date, week_end_date, COUNT(*) as record_count
+        FROM employee_xp_results 
+        WHERE week_start_date = ?
+        GROUP BY week_start_date, week_end_date
+      `;
+
+      const [weekInfoResult] = await sequelize.query(weekInfoQuery, {
+        replacements: [req.query.week_start_date]
+      });
+
+      if (weekInfoResult.length > 0) {
+        const specifiedWeek = weekInfoResult[0];
+        weekInfo = {
+          weekStartDate: specifiedWeek.week_start_date,
+          weekEndDate: specifiedWeek.week_end_date,
+          recordCount: specifiedWeek.record_count,
+          source: 'specified_week'
+        };
+      }
+    } else {
+      // Get the most recent week available in data (not current system week)
+      const latestWeekQuery = `
+        SELECT week_start_date, week_end_date, COUNT(*) as record_count
+        FROM employee_xp_results 
+        ${whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : ''}
+        GROUP BY week_start_date, week_end_date
+        ORDER BY week_start_date DESC
+        LIMIT 1
+      `;
+
+      const [latestWeekResult] = await sequelize.query(latestWeekQuery, {
+        replacements: queryParams
+      });
+
+      if (latestWeekResult.length > 0) {
+        const latestWeek = latestWeekResult[0];
+        whereConditions.push(`week_start_date = ?`);
+        queryParams.push(latestWeek.week_start_date);
+
+        weekInfo = {
+          weekStartDate: latestWeek.week_start_date,
+          weekEndDate: latestWeek.week_end_date,
+          recordCount: latestWeek.record_count,
+          source: 'latest_available_week'
+        };
+      }
+    }
+
+    const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+
+    // Get unique records with highest XP per person for the specified/latest week
+    const uniqueHighestXpQuery = `
+      SELECT e1.* FROM employee_xp_results e1
+      INNER JOIN (
+        SELECT person_id, MAX(total_xp) as max_xp
+        FROM employee_xp_results
+        ${whereClause}
+        GROUP BY person_id
+      ) e2 ON e1.person_id = e2.person_id AND e1.total_xp = e2.max_xp
+      ${whereClause}
+      ORDER BY e1.total_xp DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    // Get total count of unique persons for pagination
+    const countQuery = `
+      SELECT COUNT(DISTINCT person_id) as total
+      FROM employee_xp_results
+      ${whereClause}
+    `;
+
+    // Execute queries with proper parameter duplication for repeated WHERE clauses
+    const [rows] = await sequelize.query(uniqueHighestXpQuery, {
+      replacements: [...queryParams, ...queryParams, pageSize, offset]
     });
+
+    const [countResult] = await sequelize.query(countQuery, {
+      replacements: queryParams
+    });
+
+    const count = countResult[0]?.total || 0;
 
     const totalPages = Math.ceil(count / pageSize);
 
-    const allRecords = await EmployeeXpResults.findAll({
-      where: whereClause,
+    // Calculate statistics from unique highest XP records
+    const allUniqueRecordsQuery = `
+      SELECT e1.total_xp FROM employee_xp_results e1
+      INNER JOIN (
+        SELECT person_id, MAX(total_xp) as max_xp
+        FROM employee_xp_results
+        ${whereClause}
+        GROUP BY person_id
+      ) e2 ON e1.person_id = e2.person_id AND e1.total_xp = e2.max_xp
+      ${whereClause}
+    `;
+
+    const [allUniqueRecords] = await sequelize.query(allUniqueRecordsQuery, {
+      replacements: [...queryParams, ...queryParams]
     });
 
     const statistics = {
-      highestXP: allRecords.length > 0 ? Math.max(...allRecords.map(r => r.total_xp)) : 0,
-      lowestXP: allRecords.length > 0 ? Math.min(...allRecords.map(r => r.total_xp)) : 0,
-      averageXP: allRecords.length > 0 ? Math.round(
-        allRecords.reduce((sum, r) => sum + r.total_xp, 0) / allRecords.length
+      highestXP: allUniqueRecords.length > 0 ? Math.max(...allUniqueRecords.map(r => r.total_xp)) : 0,
+      lowestXP: allUniqueRecords.length > 0 ? Math.min(...allUniqueRecords.map(r => r.total_xp)) : 0,
+      averageXP: allUniqueRecords.length > 0 ? Math.round(
+        allUniqueRecords.reduce((sum, r) => sum + r.total_xp, 0) / allUniqueRecords.length
       ) : 0,
-      totalEmployees: count
+      totalUniqueEmployees: count,
+      description: "Statistics based on highest XP per unique employee for the selected week"
     };
+
+    // Get available weeks for dropdown/filter purposes
+    const availableWeeksQuery = `
+      SELECT DISTINCT week_start_date, week_end_date, COUNT(*) as employee_count
+      FROM employee_xp_results
+      ${req.query.location || req.query.client ?
+        'WHERE ' + [
+          req.query.location ? `location LIKE '%${req.query.location}%'` : null,
+          req.query.client ? `client LIKE '%${req.query.client}%'` : null
+        ].filter(Boolean).join(' AND ')
+        : ''
+      }
+      GROUP BY week_start_date, week_end_date
+      ORDER BY week_start_date DESC
+      LIMIT 20
+    `;
+
+    const [availableWeeks] = await sequelize.query(availableWeeksQuery);
 
     res.status(200).json({
       success: true,
       data: rows,
-      weekInfo: {
-        currentWeekStart: weekStartDateStr,
-        currentWeekEnd: weekEndDateStr,
-        autoCalculated: !req.query.week_start_date, // true if dates were auto-calculated
-        weekDescription: `Week of ${currentWeekStart.toLocaleDateString()} - ${currentWeekEnd.toLocaleDateString()}`
+      weekInfo: weekInfo || {
+        weekStartDate: null,
+        weekEndDate: null,
+        recordCount: 0,
+        source: 'no_data_found',
+        message: 'No attendance data found for the specified filters'
       },
+      availableWeeks: availableWeeks.map(week => ({
+        weekStartDate: week.week_start_date,
+        weekEndDate: week.week_end_date,
+        employeeCount: week.employee_count,
+        weekLabel: `${new Date(week.week_start_date).toLocaleDateString()} - ${new Date(week.week_end_date).toLocaleDateString()}`
+      })),
       pagination: {
         currentPage: page,
         pageSize: pageSize,
@@ -2403,11 +2699,17 @@ router.get("/users/xp-records", adminAuthMiddleware, async (req, res) => {
         hasNextPage: page < totalPages,
         hasPreviousPage: page > 1
       },
+      filters: {
+        location: req.query.location || null,
+        client: req.query.client || null,
+        weekStartDate: req.query.week_start_date || (weekInfo ? weekInfo.weekStartDate : null)
+      },
       xpCalculation: {
-        formula: "XP = 2500 × Number of Days Present (Cumulative across weeks)",
-        description: "Employee gets 2500 XP for each day they have both check-in and check-out entries. XP accumulates weekly.",
+        formula: "XP = (Days Present × 2500) - (Days Missing × 1000), minimum 0",
+        description: "Employee gets 2500 XP per day present, loses 1000 XP per day missing. Shows highest XP record per employee. Uses actual week dates from Excel uploads, not current system week.",
         xpPerDay: 2500,
-        maxWeeklyXP: 17500,
+        penaltyPerMissingDay: 1000,
+        dataSource: "Actual week dates from Excel uploads, not current system week"
       },
       statistics: statistics
     });
@@ -2452,6 +2754,22 @@ router.post("/wheel/save-configuration", async (req, res) => {
         );
       }
     }
+
+    // Validate reward_images if provided
+    if (reward_images && !Array.isArray(reward_images)) {
+      return res.status(400).send(
+        HelperUtils.errorObj("reward_images must be an array")
+      );
+    }
+
+    // Validate that reward_images array length matches sections if provided
+    if (reward_images && reward_images.length > 0 && reward_images.length !== sections) {
+      return res.status(400).send(
+        HelperUtils.errorObj(`reward_images array length (${reward_images.length}) must match sections count (${sections}) or be empty`)
+      );
+    }
+
+    console.log('Updating wheel configuration with reward_images:', reward_images);
 
     // Convert to internal format for storage
     const sectionsData = xpValues.map((xpValue, index) => ({
@@ -2498,6 +2816,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
       totalXP: wheelConfig.total_xp_pool,
       isActive: wheelConfig.is_active,
       isGlobal: wheelConfig.is_global,
+      reward_images: wheelConfig.reward_images || [], // Include updated images
       updatedAt: wheelConfig.updated_at
     });
 
@@ -3365,14 +3684,27 @@ router.post("/upload-reward-image", adminAuthMiddleware, upload.single('rewardIm
         HelperUtils.errorObj("No image file provided")
       );
     }
+
     // Store the file path or URL
     const imagePath = `/uploads/${req.file.filename}`;
+    const baseURL = process.env.BASE_URL || 'https://workwin.24livehost.com:3025';
+    const fullImageUrl = `${baseURL}${imagePath}`;
+
+    console.log('Image uploaded successfully:', {
+      originalName: req.file.originalname,
+      filename: req.file.filename,
+      imagePath: imagePath,
+      fullUrl: fullImageUrl
+    });
 
     res.status(200).send(
       HelperUtils.successObj("Image uploaded successfully", {
         imagePath: imagePath,
+        fullUrl: fullImageUrl,
         originalName: req.file.originalname,
-        size: req.file.size
+        filename: req.file.filename,
+        size: req.file.size,
+        mimetype: req.file.mimetype
       })
     );
   } catch (error) {
