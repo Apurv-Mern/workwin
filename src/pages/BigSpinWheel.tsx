@@ -28,6 +28,12 @@ const BigSpinWheel = () => {
   const [sectionImages, setSectionImages] = useState<string[]>(
     Array.from({ length: 8 }, () => "")
   );
+  const [sectionProbabilities, setSectionProbabilities] = useState<number[]>(
+    Array.from({ length: 8 }, () => 12.5) // Default equal probability
+  );
+  const [sectionQuantities, setSectionQuantities] = useState<number[]>(
+    Array.from({ length: 8 }, () => 10) // Default quantity
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
@@ -83,6 +89,20 @@ const BigSpinWheel = () => {
           );
         }
         setSectionImages(imageUrls);
+
+        // Load probabilities and quantities if they exist
+        if (
+          response.result.section_probabilities &&
+          Array.isArray(response.result.section_probabilities)
+        ) {
+          setSectionProbabilities(response.result.section_probabilities);
+        }
+        if (
+          response.result.section_quantities &&
+          Array.isArray(response.result.section_quantities)
+        ) {
+          setSectionQuantities(response.result.section_quantities);
+        }
       }
     } catch (error: any) {
       console.log("No existing configuration found or failed to load:", error);
@@ -129,6 +149,21 @@ const BigSpinWheel = () => {
 
     setIsSaving(true);
     try {
+      // Validate probabilities sum to 100%
+      const totalProbability = sectionProbabilities.reduce(
+        (sum, prob) => sum + prob,
+        0
+      );
+      if (Math.abs(totalProbability - 100) > 0.01) {
+        showNotification(
+          `Total probability must equal 100%. Current total: ${totalProbability.toFixed(
+            1
+          )}%`,
+          "danger"
+        );
+        return;
+      }
+
       const configData = {
         id: 2,
         sections: wheelSections,
@@ -137,6 +172,8 @@ const BigSpinWheel = () => {
         totalXP: 0, // No XP for big wheel
         type: "rewards", // Always rewards for big wheel
         reward_images: sectionImages, // Include reward images
+        section_probabilities: sectionProbabilities, // Include probabilities
+        section_quantities: sectionQuantities, // Include quantities
       };
 
       const response = await saveWheelConfigurationRequest(configData);
@@ -217,6 +254,18 @@ const BigSpinWheel = () => {
       return sectionImages[index] || "";
     });
     setSectionImages(newImages);
+
+    // Adjust probabilities array to match new section count
+    const newProbabilities = Array.from({ length: newSections }, (_, index) => {
+      return sectionProbabilities[index] || 100 / newSections; // Equal distribution
+    });
+    setSectionProbabilities(newProbabilities);
+
+    // Adjust quantities array to match new section count
+    const newQuantities = Array.from({ length: newSections }, (_, index) => {
+      return sectionQuantities[index] || 10; // Default quantity
+    });
+    setSectionQuantities(newQuantities);
   };
 
   const handleRewardChange = (sectionIndex: number, reward: string) => {
@@ -389,6 +438,64 @@ const BigSpinWheel = () => {
                             </div>
                           </div>
                         )}
+
+                        {/* Probability Input */}
+                        <div className="mt-2">
+                          <Form.Label className="small mb-1">
+                            Probability (%)
+                          </Form.Label>
+                          <Form.Control
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={sectionProbabilities[index]}
+                            onChange={(e) => {
+                              const newProbabilities = [
+                                ...sectionProbabilities,
+                              ];
+                              newProbabilities[index] =
+                                parseFloat(e.target.value) || 0;
+                              setSectionProbabilities(newProbabilities);
+                            }}
+                            // onBlur={() => {
+                            //   // Auto-adjust probabilities to sum to 100%
+                            //   const total = sectionProbabilities.reduce(
+                            //     (sum, prob) => sum + prob,
+                            //     0
+                            //   );
+                            //   if (total > 0 && Math.abs(total - 100) > 0.01) {
+                            //     const adjustedProbabilities =
+                            //       sectionProbabilities.map(
+                            //         (prob) => (prob / total) * 100
+                            //       );
+                            //     setSectionProbabilities(adjustedProbabilities);
+                            //   }
+                            // }}
+                            size="sm"
+                            placeholder="0.0"
+                          />
+                        </div>
+
+                        {/* Quantity Input */}
+                        <div className="mt-2">
+                          <Form.Label className="small mb-1">
+                            Quantity
+                          </Form.Label>
+                          <Form.Control
+                            type="number"
+                            min="0"
+                            value={sectionQuantities[index]}
+                            onChange={(e) => {
+                              const newQuantities = [...sectionQuantities];
+                              newQuantities[index] =
+                                parseInt(e.target.value) || 0;
+                              setSectionQuantities(newQuantities);
+                            }}
+                            size="sm"
+                            placeholder="0"
+                          />
+                        </div>
                       </Form.Group>
                     </div>
                   ))}

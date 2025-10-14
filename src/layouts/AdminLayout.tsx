@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
-import {
-  Navbar,
-  Nav,
-  Container,
-  Button,
-  Dropdown,
-} from "react-bootstrap";
+import { Navbar, Nav, Container, Button, Dropdown } from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
 import { logout } from "../store/slices/authSlice";
 import { usePermissions } from "../utils/handlePermissions";
@@ -120,8 +114,9 @@ const AdminLayout: React.FC = () => {
       <div className="d-flex flex-grow-1">
         {/* Sidebar */}
         <div
-          className={`sidebar bg-light border-end ${sidebarCollapsed ? "collapsed" : ""
-            } ${mobileMenuOpen ? "mobile-open" : ""}`}
+          className={`sidebar bg-light border-end ${
+            sidebarCollapsed ? "collapsed" : ""
+          } ${mobileMenuOpen ? "mobile-open" : ""}`}
           style={{
             width: sidebarCollapsed ? "60px" : "250px",
             transition: "width 0.3s ease, transform 0.3s ease",
@@ -145,10 +140,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/dashboard"
-              className={`py-3 ${location.pathname === "/dashboard"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/dashboard"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-speedometer2 me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -159,10 +155,11 @@ const AdminLayout: React.FC = () => {
               <LinkNavItem
                 as={Link}
                 to="/users"
-                className={`py-3 ${location.pathname.startsWith("/users")
-                  ? "active bg-primary text-white"
-                  : ""
-                  }`}
+                className={`py-3 ${
+                  location.pathname.startsWith("/users")
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
               >
                 <i className="bi bi-people me-3"></i>
                 <span className={sidebarCollapsed ? "d-none" : ""}>Users</span>
@@ -172,10 +169,11 @@ const AdminLayout: React.FC = () => {
               <LinkNavItem
                 as={Link}
                 to="/role/management"
-                className={`py-3 ${location.pathname === "/role/management"
-                  ? "active bg-primary text-white"
-                  : ""
-                  }`}
+                className={`py-3 ${
+                  location.pathname === "/role/management"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
               >
                 <i className="bi bi-trophy me-3"></i>
                 <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -187,10 +185,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/xp-system"
-              className={`py-3 ${location.pathname === "/xp-system"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/xp-system"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-trophy me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -201,10 +200,11 @@ const AdminLayout: React.FC = () => {
               <LinkNavItem
                 as={Link}
                 to="/leaderboard"
-                className={`py-3 ${location.pathname === "/leaderboard"
-                  ? "active bg-primary text-white"
-                  : ""
-                  }`}
+                className={`py-3 ${
+                  location.pathname === "/leaderboard"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
               >
                 <i className="bi bi-trophy me-3"></i>
                 <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -217,10 +217,11 @@ const AdminLayout: React.FC = () => {
               <LinkNavItem
                 as={Link}
                 to="/reward"
-                className={`py-3 ${location.pathname === "/reward"
-                  ? "active bg-primary text-white"
-                  : ""
-                  }`}
+                className={`py-3 ${
+                  location.pathname === "/reward"
+                    ? "active bg-primary text-white"
+                    : ""
+                }`}
               >
                 <i className="bi bi-bar-chart-steps me-3"></i>
                 <span className={sidebarCollapsed ? "d-none" : ""}>Reward</span>
@@ -230,10 +231,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/mini-spin-wheel"
-              className={`py-3 ${location.pathname === "/mini-spin-wheel"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/mini-spin-wheel"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-arrow-clockwise me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -244,10 +246,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/big-spin-wheel"
-              className={`py-3 ${location.pathname === "/big-spin-wheel"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/big-spin-wheel"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-disc me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -258,10 +261,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/bonus-season"
-              className={`py-3 ${location.pathname === "/bonus-season"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/bonus-season"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-calendar-event me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -272,10 +276,11 @@ const AdminLayout: React.FC = () => {
             <LinkNavItem
               as={Link}
               to="/xp-thresholds"
-              className={`py-3 ${location.pathname === "/xp-thresholds"
-                ? "active bg-primary text-white"
-                : ""
-                }`}
+              className={`py-3 ${
+                location.pathname === "/xp-thresholds"
+                  ? "active bg-primary text-white"
+                  : ""
+              }`}
             >
               <i className="bi bi-sliders me-3"></i>
               <span className={sidebarCollapsed ? "d-none" : ""}>
@@ -336,8 +341,9 @@ const AdminLayout: React.FC = () => {
               onClick={toggleSidebar}
             >
               <i
-                className={`bi bi-chevron-${sidebarCollapsed ? "right" : "left"
-                  } me-1`}
+                className={`bi bi-chevron-${
+                  sidebarCollapsed ? "right" : "left"
+                } me-1`}
               ></i>
               {!sidebarCollapsed && <span>Collapse</span>}
             </Button>

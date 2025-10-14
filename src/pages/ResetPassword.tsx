@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import axios from "axios";
 import { API_LIVE_URL } from "../config/BaseUrls";
@@ -83,9 +83,9 @@ const ResetPassword: React.FC = () => {
               <div className="card-body p-4 text-center">
                 <h3>Invalid Reset Link</h3>
                 <p>The password reset link is invalid or has expired.</p>
-                <Link to="/login" className="btn btn-primary">
+                {/* <Link to="/login" className="btn btn-primary">
                   Back to Login
-                </Link>
+                </Link> */}
               </div>
             </div>
           </div>
@@ -188,9 +188,9 @@ const ResetPassword: React.FC = () => {
               </form>
 
               <div className="mt-3 text-center">
-                <Link to="/login" className="text-decoration-none">
+                {/* <Link to="/login" className="text-decoration-none">
                   Back to Login
-                </Link>
+                </Link> */}
               </div>
             </div>
           </div>
