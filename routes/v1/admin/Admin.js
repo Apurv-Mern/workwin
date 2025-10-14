@@ -1920,7 +1920,6 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         row.week_start_date || row.Week_Start_Date || row['Week Start Date'] ||
         row.Sun_In || row.Mon_In || row.Tue_In // Also check for attendance date columns
       );
-
       if (firstRowWithWeekData) {
         // Try to get week_start_date directly from the column
         const weekStartRaw = firstRowWithWeekData.week_start_date ||
@@ -1933,7 +1932,11 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
 
             // If it's already a date object
             if (dateValue instanceof Date) {
-              return dateValue.toISOString().split('T')[0];
+              const y = dateValue.getFullYear();
+              const m = String(dateValue.getMonth() + 1).padStart(2, '0');
+              const d = String(dateValue.getDate()).padStart(2, '0');
+              // Format using local calendar values to avoid UTC shift
+              return `${y}-${m}-${d}`;
             }
 
             // If it's a string in DD-MM-YYYY format (like "28-09-2025 00:00")
@@ -1951,7 +1954,10 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
               // Try standard date parsing
               const parsed = new Date(dateValue);
               if (!isNaN(parsed.getTime())) {
-                return parsed.toISOString().split('T')[0];
+                const y = parsed.getFullYear();
+                const m = String(parsed.getMonth() + 1).padStart(2, '0');
+                const d = String(parsed.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
               }
             }
 
@@ -1959,7 +1965,10 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
             if (typeof dateValue === 'number' && dateValue > 40000) {
               const excelEpoch = new Date(1900, 0, 1);
               const date = new Date(excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000);
-              return date.toISOString().split('T')[0];
+              const y = date.getFullYear();
+              const m = String(date.getMonth() + 1).padStart(2, '0');
+              const d = String(date.getDate()).padStart(2, '0');
+              return `${y}-${m}-${d}`;
             }
 
             return null;
@@ -2065,6 +2074,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     // 3. Auto-calculated current week dates (fallback)
     let calculatedWeekStart = weekStartDate;
     let calculatedWeekEnd = weekEndDate;
+
+    console.log(calculatedWeekStart, calculatedWeekEnd)
     let dateSource = 'manual';
 
     if (!weekStartDate || !weekEndDate) {
@@ -2099,12 +2110,16 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       const email = row.Email;
       const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
 
+      // Normalize identifiers to avoid mismatches due to spaces/case
+      const normEmpCode = (empCode || '').trim();
+      const normEmail = (email || '').trim().toLowerCase();
+
       // Get the latest record to check for existing data and multiplier (using both empCode and email)
       const latestRecord = await EmployeeXpResults.findOne({
         where: {
           [Op.and]: [
-            { emp_code: empCode },
-            { email: email }
+            { emp_code: normEmpCode },
+            { email: normEmail }
           ]
         },
         order: [["upload_date", "DESC"]],
@@ -2121,40 +2136,69 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       const currentWeekPerfect = Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length === 7;
 
       // Calculate streak (pass email for unique identification)
-      const streakData = await calculateOverallStreak(empCode, email, xpCalculation.attendanceDetails, transaction);
+      const streakData = await calculateOverallStreak(normEmpCode, normEmail, xpCalculation.attendanceDetails, transaction);
 
       // Calculate season bonus XP based on consecutive perfect weeks (pass email for unique identification)
-      const seasonBonus = await calculateSeasonBonus(empCode, email, currentWeekPerfect, transaction);
+      const seasonBonus = await calculateSeasonBonus(normEmpCode, normEmail, currentWeekPerfect, transaction);
 
-      // Calculate cumulative XP (sum of all previous weeks + current week) - using both empCode and email for unique lookup
-      const allPreviousRecords = await EmployeeXpResults.findAll({
+      // Calculate weekly XP from this file (attendance + bonus)
+      const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
+
+      // Compute delta for the same week to prevent double-counting on re-uploads
+      const recentRecords = await EmployeeXpResults.findAll({
         where: {
           [Op.and]: [
-            { emp_code: empCode },
-            { email: email }
+            { emp_code: normEmpCode },
+            { email: normEmail }
           ]
         },
-        attributes: ['total_xp'],
+        order: [["upload_date", "DESC"], ["id", "DESC"]],
+        limit: 2,
+        attributes: ["total_xp", "week_start_date"],
         transaction
       });
 
-      const previousTotalXP = allPreviousRecords.reduce((sum, record) => sum + record.total_xp, 0);
-      const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP; // This week's attendance XP + bonus
-      const cumulativeAttendanceXP = previousTotalXP + weeklyXP; // Total attendance XP from all weeks
+      const latestPrev = recentRecords[0] || null; // most recent cumulative
+      const prevOfPrev = recentRecords[1] || null; // baseline before most recent
 
-      // Update user level and badges by ADDING this week's XP to existing totalUserXp
-      const userLevelUpdate = await updateUserLevelAndBadges(empCode, email, weeklyXP, transaction);
+      const previousCumulativeXP = latestPrev ? (latestPrev.total_xp || 0) : 0;
+      const previousBaselineXP = prevOfPrev ? (prevOfPrev.total_xp || 0) : 0;
+      const lastRecordedWeekStart = latestPrev ? latestPrev.week_start_date : null;
 
-      // Log XP gains to UserXpLog (pass email for unique identification)
-      await logAttendanceXp(
-        empCode,
-        email,
-        xpCalculation.totalXP,
-        seasonBonus.bonusXP,
-        calculatedWeekStart,
-        `Weekly attendance: ${Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length}/7 days present`,
-        transaction
-      );
+      const lastWeekXPRecorded = (lastRecordedWeekStart && calculatedWeekStart && String(lastRecordedWeekStart) === String(calculatedWeekStart))
+        ? Math.max(previousCumulativeXP - previousBaselineXP, 0)
+        : 0;
+
+      const deltaWeeklyXP = Math.max(weeklyXP - lastWeekXPRecorded, 0);
+      const cumulativeAttendanceXP = previousCumulativeXP + deltaWeeklyXP; // new cumulative
+
+      // Update user level and badges with only the delta
+      const userLevelUpdate = await updateUserLevelAndBadges(normEmpCode, normEmail, deltaWeeklyXP, transaction);
+
+      // Log only the delta XP (avoid duplicate logs on re-uploads)
+      if (deltaWeeklyXP > 0) {
+        const userForLog = await Users.findOne({
+          where: {
+            [Op.or]: [
+              { userCode: normEmpCode },
+              { email: normEmail }
+            ]
+          },
+          attributes: ["id"],
+          transaction
+        });
+        if (userForLog) {
+          await UserXpLog.create({
+            userId: userForLog.id,
+            season_id: null,
+            source: 'attribute',
+            type: 'weekly_attendance',
+            xp: deltaWeeklyXP,
+            date: calculatedWeekStart || new Date().toISOString().split('T')[0],
+            description: `Weekly attendance (delta): +${deltaWeeklyXP} XP for week starting ${calculatedWeekStart}`
+          }, { transaction });
+        }
+      }
 
       // Always CREATE a new record (no updates to maintain history)
       await EmployeeXpResults.create({
@@ -2162,25 +2206,19 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         firstname: row.Firstname,
         surname: row.Surname,
         full_name: fullName,
-        emp_code: empCode,
-        email: row.Email,
+        emp_code: normEmpCode,
+        email: normEmail,
         location: row.locationName,
         client: row.ClientName,
-        total_xp: cumulativeAttendanceXP, // This represents cumulative attendance XP across all weeks
+        total_xp: cumulativeAttendanceXP, // cumulative attendance XP across all weeks
         season_bonus_xp: seasonBonus.bonusXP,
         season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
         current_level: userLevelUpdate.updated ? userLevelUpdate.newLevel : 1, // Include calculated level
-
-        // Set multiplier from latest record or default
         multiplier: currentMultiplier,
-
         current_streak: streakData.currentStreak,
         max_streak: streakData.maxStreak,
-
         total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
         total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
-
-        // Daily attendance flags for current week
         sunday_present: xpCalculation.attendanceDetails.sun.present,
         monday_present: xpCalculation.attendanceDetails.mon.present,
         tuesday_present: xpCalculation.attendanceDetails.tue.present,
@@ -2188,8 +2226,6 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         thursday_present: xpCalculation.attendanceDetails.thu.present,
         friday_present: xpCalculation.attendanceDetails.fri.present,
         saturday_present: xpCalculation.attendanceDetails.sat.present,
-
-        // Daily hours for current week
         sunday_hours: xpCalculation.attendanceDetails.sun.hours,
         monday_hours: xpCalculation.attendanceDetails.mon.hours,
         tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
@@ -2197,7 +2233,6 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         thursday_hours: xpCalculation.attendanceDetails.thu.hours,
         friday_hours: xpCalculation.attendanceDetails.fri.hours,
         saturday_hours: xpCalculation.attendanceDetails.sat.hours,
-
         upload_date: new Date(),
         week_start_date: calculatedWeekStart,
         week_end_date: calculatedWeekEnd,
@@ -2205,7 +2240,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       }, { transaction });
 
       processedEmployees.push({
-        emp_code: empCode,
+        emp_code: normEmpCode,
         name: fullName,
         weekly_xp: xpCalculation.totalXP, // XP earned this week only
         season_bonus_earned: seasonBonus.bonusXP,
@@ -2729,7 +2764,7 @@ router.post("/wheel/save-configuration", async (req, res) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const { id, sections, xpValues, totalXP, type, reward_images } = req.body;
+    const { id, sections, xpValues, totalXP, type, reward_images, section_probabilities, section_quantities } = req.body;
 
     // Validation
     if (!sections || sections < 2 || sections > 20) {
@@ -2793,8 +2828,12 @@ router.post("/wheel/save-configuration", async (req, res) => {
       created_by: "admin",
       created_at: new Date(),
       updated_at: new Date(),
-      reward_images: reward_images || []
+      reward_images: reward_images || [],
+      section_probabilities: (section_probabilities) || [],
+      section_quantities: section_quantities || []
     };
+
+    console.log(configData)
 
     let wheelConfig;
     if (existingConfig) {
@@ -2816,8 +2855,10 @@ router.post("/wheel/save-configuration", async (req, res) => {
       totalXP: wheelConfig.total_xp_pool,
       isActive: wheelConfig.is_active,
       isGlobal: wheelConfig.is_global,
+      section_probabilities: wheelConfig.section_probabilities || [],
+      section_quantities: wheelConfig.section_quantities || [],
       reward_images: wheelConfig.reward_images || [], // Include updated images
-      updatedAt: wheelConfig.updated_at
+      updatedAt: wheelConfig.updated_at,
     });
 
   } catch (err) {
@@ -2849,7 +2890,9 @@ router.get("/wheel/configuration/:id", async (req, res) => {
         'is_active',
         "is_big",
         "type",
-        "reward_images"
+        "reward_images",
+        "section_probabilities",
+        "section_quantities"
       ]
     });
 
@@ -2868,7 +2911,9 @@ router.get("/wheel/configuration/:id", async (req, res) => {
       isActive: wheelConfig.is_active,
       isBig: wheelConfig.is_big,
       type: wheelConfig.type,
-      reward_images: wheelConfig.reward_images || []
+      reward_images: wheelConfig.reward_images || [],
+      section_probabilities: (wheelConfig.section_probabilities) || [],
+      section_quantities: wheelConfig.section_quantities || []
     };
 
     res.status(200).send(

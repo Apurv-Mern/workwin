@@ -97,6 +97,54 @@ class SpinTheWheel extends Model {
                         this.setDataValue('reward_images', jsonString);
                     }
                 }
+            },
+            section_probabilities: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                comment: 'JSON array of section probabilities',
+                get() {
+                    const rawValue = this.getDataValue('section_probabilities');
+                    if (!rawValue) {
+                        return [];
+                    }
+                    try {
+                        return JSON.parse(rawValue);
+                    } catch (error) {
+                        console.error('Error parsing section_probabilities:', error);
+                        return [];
+                    }
+                },
+                set(value) {
+                    if (Array.isArray(value)) {
+                        this.setDataValue('section_probabilities', JSON.stringify(value));
+                    } else {
+                        this.setDataValue('section_probabilities', JSON.stringify([]));
+                    }
+                }
+            },
+            section_quantities: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                comment: 'JSON array of section quantities',
+                get() {
+                    const rawValue = this.getDataValue('section_quantities');
+                    if (!rawValue) {
+                        return [];
+                    }
+                    try {
+                        return JSON.parse(rawValue);
+                    } catch (error) {
+                        console.error('Error parsing section_quantities:', error);
+                        return [];
+                    }
+                },
+                set(value) {
+                    if (Array.isArray(value)) {
+                        this.setDataValue('section_quantities', JSON.stringify(value));
+                    } else {
+                        this.setDataValue('section_quantities', JSON.stringify([]));
+                    }
+                }
             }
             ,
             created_at: {

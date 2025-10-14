@@ -551,11 +551,11 @@ router.post('/spin-wheel', userAuthMiddleware, async (req, res) => {
 
     // Allow up to 3 spins per day (configurable)
     const MAX_DAILY_SPINS = 3;
-    if (todaySpins >= MAX_DAILY_SPINS) {
-      return res.status(429).send(
-        HelperUtils.errorObj(`Daily spin limit reached. Maximum ${MAX_DAILY_SPINS} spins per day.`)
-      );
-    }
+    // if (todaySpins >= MAX_DAILY_SPINS) {
+    //   return res.status(429).send(
+    //     HelperUtils.errorObj(`Daily spin limit reached. Maximum ${MAX_DAILY_SPINS} spins per day.`)
+    //   );
+    // }
 
     let xpGained = 0;
     let description = '';
@@ -859,7 +859,7 @@ router.post('/forgot_password', async (req, res) => {
     }
 
     const resetToken = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '15m' });
-    const resetLink = `https://https://workwin.24livehost.com/reset-password?token=${resetToken}`;
+    const resetLink = `https://workwin.24livehost.com/reset-password?token=${resetToken}`;
 
     // Send response immediately
     res.status(200).send(HelperUtils.successObj("Password reset instruction sent to your mail id."));
@@ -990,10 +990,10 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
 
     // Check if the requested game is unlocked
     if (!finalUnlockedGames.includes(gameIndex)) {
-      return res.status(403).send(HelperUtils.errorObj(
-        `Game ${gameIndex} is not unlocked. Available games: [${finalUnlockedGames.join(', ')}]. ` +
-        `Unlock more games by reaching week ${gameIndex + 1} or achieving a streak multiple of 7.`
-      ));
+      // return res.status(403).send(HelperUtils.errorObj(
+      //   `Game ${gameIndex} is not unlocked. Available games: [${finalUnlockedGames.join(', ')}]. ` +
+      //   `Unlock more games by reaching week ${gameIndex + 1} or achieving a streak multiple of 7.`
+      // ));
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -1005,21 +1005,23 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       where: {
         userId,
         source: 'game',
-        season_id: season?.id,
+        // season_id: season?.id,
         type: gameType,
         date: today
       }
     });
 
-    if (todayPlays >= 3) {
-      return res.status(403).send(HelperUtils.errorObj(`Daily limit of 3 plays reached for ${gameType}.`));
+    // Check if daily limit is reached BEFORE creating log entry
+    const MAX_DAILY_PLAYS = 3;
+    if (todayPlays >= MAX_DAILY_PLAYS) {
+      return res.status(403).send(HelperUtils.errorObj(`Daily limit of ${MAX_DAILY_PLAYS} plays reached for ${gameType}.`));
     }
 
     //  Check XP cap of 50
     const todayXpTotal = await UserXpLog.sum('xp', {
       where: {
         userId,
-        season_id: season?.id,
+        // season_id: season?.id,
         source: 'game',
         date: today
       }
@@ -1035,7 +1037,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
         userId,
         source: 'game',
         type: gameType,
-        season_id: season?.id
+        // season_id: season?.id
       }
     }) || 0;
 
@@ -1057,9 +1059,9 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       description: description || `Played ${gameType} and scored ${score}${isNewHighscore ? ' (New Highscore!)' : ''}`
     });
 
-
     //  Update user's XP and level (uses dynamic level_definitions)
     const updatedLevel = await updateLevelAndUserXP(userId, xp);
+
 
     res.status(200).send(HelperUtils.successObj("XP claimed successfully", {
       currentLevel: updatedLevel.level,
@@ -1067,7 +1069,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
       score: score,
       highscore: highscore,
       isNewHighscore: isNewHighscore,
-      playsRemaining: 3 - todayPlays - 1
+      playsRemaining: MAX_DAILY_PLAYS - todayPlays - 1
     }));
 
   } catch (err) {
@@ -1529,10 +1531,9 @@ router.get("/wheel/configuration", userAuthMiddleware, async (req, res) => {
 });
 
 // Season Dashboard
-router.get('/season/dashboard', async (req, res) => {
+router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
   try {
-    const userId = 14;
-    // const userId = req.user?.userId;
+    const userId = req.user?.userId;
 
     let empCode = await Users.findOne({
       where: { id: userId },
@@ -1599,7 +1600,7 @@ router.get('/season/dashboard', async (req, res) => {
         id: wheelId,
         is_active: true
       },
-      attributes: ['id', 'number_of_sections', 'sections', 'total_xp_pool', 'reward_images', 'type']
+      attributes: ['id', 'number_of_sections', 'sections', 'total_xp_pool', 'reward_images', 'type', 'section_probabilities', 'section_quantities']
     });
 
 
@@ -1608,7 +1609,8 @@ router.get('/season/dashboard', async (req, res) => {
       const storedSections = JSON.parse(wheelConfig.sections);
       const rewardImages = wheelConfig.reward_images || [];
       const wheelType = wheelConfig.type || 'mixed';
-
+      const sectionProbabilities = wheelConfig.section_probabilities || [];
+      const sectionQuantities = wheelConfig.section_quantities || [];
       // Ensure rewardImages is an array
       if (typeof rewardImages === 'string') {
         try {
@@ -1647,7 +1649,8 @@ router.get('/season/dashboard', async (req, res) => {
           sectionNumber: section.sectionNumber || index + 1,
           xpValue: section.xpValue,
           image: processImagePath(sectionImagePath),
-          probability: calculateSectionProbability(wheelConfig.number_of_sections, index),
+          probability: sectionQuantities[index] > 0 ? sectionProbabilities[index] : 0,
+          quantity: sectionQuantities[index],
           isActive: true,
         };
       });
@@ -1817,6 +1820,13 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
     const userId = req.user.userId;
     const { rewardValue, wheelType, sectionId, rewardType, rewardImageUrl } = req.body;
 
+    let wheelId = 0;
+    if (wheelType === "pixie_wheel") {
+      wheelId = 1;
+    } else {
+      wheelId = 2
+    }
+
     // Validation for reward type
     if (!rewardType || !['xp', 'reward'].includes(rewardType)) {
       return res.status(400).send(
@@ -1841,6 +1851,27 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).send(HelperUtils.errorObj("User not found"));
     }
+
+    // Check daily spin limit for this wheel type
+    const currentDate = new Date();
+    const dateOnly = currentDate.toISOString().split('T')[0];
+
+    const todaySpins = await UserXpLog.count({
+      where: {
+        userId: userId,
+        source: 'game',
+        type: `wheel_spin_${wheelType}`,
+        date: dateOnly
+      },
+      transaction
+    });
+
+    // const MAX_DAILY_SPINS = 3;
+    // if (todaySpins >= MAX_DAILY_SPINS) {
+    //   return res.status(429).send(
+    //     HelperUtils.errorObj(`Daily spin limit reached. Maximum ${MAX_DAILY_SPINS} spins per day.`)
+    //   );
+    // }
 
     let finalXP = 0;
     let bonusMultiplier = 1;
@@ -1883,9 +1914,6 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
       };
     }
 
-    // Log all spin results (both XP and reward wins) for admin tracking
-    const currentDate = new Date();
-    const dateOnly = currentDate.toISOString().split('T')[0];
 
     let logDescription;
     if (rewardType === 'xp') {
@@ -1901,6 +1929,67 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
       }
     }
 
+    // If this is a reward or XP win, decrease quantity in wheel configuration
+    let remainingQuantity = null;
+    if (rewardType === 'reward' || rewardType === 'xp') {
+      try {
+        const wheelConfig = await SpinTheWheel.findOne({
+          where: { id: wheelId, is_active: true },
+          transaction
+        });
+
+        if (wheelConfig) {
+          // Parse sections to find the index by value
+          let sectionsArray = [];
+          try {
+            sectionsArray = JSON.parse(wheelConfig.sections || '[]');
+          } catch (_) {
+            sectionsArray = [];
+          }
+
+          let matchedIndex = -1;
+          if (rewardType === 'reward') {
+            const normalizedTarget = String(rewardValue).trim().toLowerCase();
+            matchedIndex = sectionsArray.findIndex((s) => {
+              const val = s && s.value !== undefined ? s.value : s?.xpValue; // backward compatibility
+              return typeof val === 'string' && String(val).trim().toLowerCase() === normalizedTarget;
+            });
+          } else {
+            // XP: match numeric value or fallback to sectionId if provided
+            const xpNumeric = parseInt(rewardValue, 10);
+            matchedIndex = sectionsArray.findIndex((s) => {
+              const val = s && s.value !== undefined ? s.value : s?.xpValue; // backward compatibility
+              return typeof val === 'number' && val === xpNumeric;
+            });
+            if (matchedIndex === -1 && sectionId) {
+              const idxFromSection = parseInt(sectionId, 10) - 1;
+              if (!isNaN(idxFromSection)) matchedIndex = idxFromSection;
+            }
+          }
+
+          const quantities = Array.isArray(wheelConfig.section_quantities) ? wheelConfig.section_quantities : [];
+
+          if (matchedIndex >= 0 && matchedIndex < quantities.length) {
+            const currentQty = parseInt(quantities[matchedIndex]) || 0;
+            if (currentQty > 0) {
+              quantities[matchedIndex] = currentQty - 1;
+              await wheelConfig.update({ section_quantities: quantities }, { transaction });
+              remainingQuantity = quantities[matchedIndex];
+              console.log(`Decreased quantity for ${rewardType === 'reward' ? 'reward' : 'xp'} "${rewardValue}" in ${wheelType} wheel. New quantity: ${remainingQuantity}`);
+            } else {
+              remainingQuantity = 0;
+            }
+          } else {
+            // If we can't match the reward in sections, do not modify quantities but report as unknown (null)
+            remainingQuantity = null;
+          }
+        }
+      } catch (error) {
+        console.error("Error updating quantity:", error);
+        // Don't fail the entire transaction for quantity update errors
+      }
+    }
+    console.log(remainingQuantity)
     // Create log entry for both XP and reward wins (for admin tracking)
     await UserXpLog.create({
       userId: userId,
@@ -1984,12 +2073,14 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
         type: 'xp',
         originalXP: parseInt(rewardValue, 10),
         bonusMultiplier: bonusMultiplier,
-        finalXP: finalXP
+        finalXP: finalXP,
+        remainingQuantity: remainingQuantity === null ? null : remainingQuantity
       } : {
         type: 'reward',
         rewardValue: rewardValue,
         xpAwarded: 0,
-        bonusMultiplier: bonusMultiplier
+        bonusMultiplier: bonusMultiplier,
+        remainingQuantity: remainingQuantity === null ? null : remainingQuantity
       },
       seasonInfo: seasonInfo,
       userStats: updatedUserLevel ? {
@@ -2125,6 +2216,45 @@ router.get("/global-highscores", userAuthMiddleware, async (req, res) => {
   }
 });
 
+
+// Get how many times the logged-in user played a given game in the last 24 hours
+router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { gameType } = req.query;
+
+    if (!gameType || typeof gameType !== 'string' || gameType.trim() === '') {
+      return res.status(400).send(
+        HelperUtils.errorObj("gameType must be a non-empty string")
+      );
+    }
+
+    const now = new Date();
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const count = await UserXpLog.count({
+      where: {
+        userId,
+        source: 'game',
+        type: gameType,
+        createdAt: { [Op.gte]: since }
+      }
+    });
+
+    return res.status(200).send(
+      HelperUtils.successObj('Play count fetched successfully', {
+        gameType,
+        count,
+        hasPlayedThreeOrMore: count >= 3
+      })
+    );
+  } catch (error) {
+    console.error('Error fetching game play count:', error);
+    return res.status(500).send(
+      HelperUtils.errorObj('Failed to fetch game play count')
+    );
+  }
+});
 
 module.exports = router;
 
