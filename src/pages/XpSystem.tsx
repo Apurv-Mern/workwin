@@ -63,7 +63,7 @@ const XpSystem = () => {
           file,
         })
       );
-
+      console.log(res);
       if (PostUsersExcelUploadCode.fulfilled.match(res)) {
         // call the fetch xp records action
         dispatch(
@@ -74,6 +74,8 @@ const XpSystem = () => {
           })
         );
         toast.success("File uploaded successfully!");
+      } else if (PostUsersExcelUploadCode.rejected.match(res)) {
+        toast.error((res.payload as any).errors[0].error);
       }
     } catch (error) {
       toast.error("Upload failed. Please try again.");

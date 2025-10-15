@@ -141,13 +141,14 @@ export const PostUsersWeightsCode = createAsyncThunk(
 );
 
 export const PostUsersExcelUploadCode = createAsyncThunk(
-  "users/PostUsersWeightsCode",
+  "users/PostUsersWeightsCodes",
   async ({ file }: { file: File }, { rejectWithValue }) => {
     try {
       const response = await postUserExcelUploadRequest(file);
+      console.log(response);
       return response;
     } catch (error: any) {
-      return rejectWithValue(error.message || "Failed to fetch users");
+      return rejectWithValue(error);
     }
   }
 );

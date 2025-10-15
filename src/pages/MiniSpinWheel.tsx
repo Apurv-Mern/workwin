@@ -259,46 +259,6 @@ const MiniSpinWheel = () => {
     }
   };
 
-  const handleWheelSectionsChange = (newSections: number) => {
-    setWheelSections(newSections);
-
-    // Adjust XP values array to match new section count
-    const newXpValues = Array.from({ length: newSections }, (_, index) => {
-      return sectionXpValues[index] || (index + 1) * 100;
-    });
-    setSectionXpValues(newXpValues);
-
-    // Adjust rewards array to match new section count
-    const newRewards = Array.from({ length: newSections }, (_, index) => {
-      return sectionRewards[index] || `Reward ${index + 1}`;
-    });
-    setSectionRewards(newRewards);
-
-    // Adjust section types array (alternating XP and Rewards)
-    const newSectionTypes = Array.from({ length: newSections }, (_, index) =>
-      index % 2 === 0 ? ("XP" as const) : ("Rewards" as const)
-    );
-    setSectionTypes(newSectionTypes);
-
-    // Adjust images array to match new section count
-    const newImages = Array.from({ length: newSections }, (_, index) => {
-      return sectionImages[index] || "";
-    });
-    setSectionImages(newImages);
-
-    // Adjust probabilities array to match new section count
-    const newProbabilities = Array.from({ length: newSections }, (_, index) => {
-      return sectionProbabilities[index] || 100 / newSections; // Equal distribution
-    });
-    setSectionProbabilities(newProbabilities);
-
-    // Adjust quantities array to match new section count
-    const newQuantities = Array.from({ length: newSections }, (_, index) => {
-      return sectionQuantities[index] || 10; // Default quantity
-    });
-    setSectionQuantities(newQuantities);
-  };
-
   const handleSectionTypeChange = (
     sectionIndex: number,
     type: "XP" | "Rewards"
@@ -394,7 +354,7 @@ const MiniSpinWheel = () => {
               <h5 className="mb-0">Wheel Configuration</h5>
             </Card.Header>
             <Card.Body>
-              <Form.Group className="mb-3">
+              {/* <Form.Group className="mb-3">
                 <Form.Label>Number of Sections</Form.Label>
                 <Form.Control
                   type="number"
@@ -408,7 +368,7 @@ const MiniSpinWheel = () => {
                 <Form.Text className="text-muted">
                   Minimum 2, Maximum 10 sections (Mix of XP and Rewards)
                 </Form.Text>
-              </Form.Group>
+              </Form.Group> */}
 
               <div className="mb-3">
                 <Form.Label>Configure Each Section</Form.Label>

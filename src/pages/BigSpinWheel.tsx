@@ -239,35 +239,6 @@ const BigSpinWheel = () => {
       setIsActivating(false);
     }
   };
-
-  const handleWheelSectionsChange = (newSections: number) => {
-    setWheelSections(newSections);
-
-    // Adjust rewards array to match new section count
-    const newRewards = Array.from({ length: newSections }, (_, index) => {
-      return sectionRewards[index] || `Big Reward ${index + 1}`;
-    });
-    setSectionRewards(newRewards);
-
-    // Adjust images array to match new section count
-    const newImages = Array.from({ length: newSections }, (_, index) => {
-      return sectionImages[index] || "";
-    });
-    setSectionImages(newImages);
-
-    // Adjust probabilities array to match new section count
-    const newProbabilities = Array.from({ length: newSections }, (_, index) => {
-      return sectionProbabilities[index] || 100 / newSections; // Equal distribution
-    });
-    setSectionProbabilities(newProbabilities);
-
-    // Adjust quantities array to match new section count
-    const newQuantities = Array.from({ length: newSections }, (_, index) => {
-      return sectionQuantities[index] || 10; // Default quantity
-    });
-    setSectionQuantities(newQuantities);
-  };
-
   const handleRewardChange = (sectionIndex: number, reward: string) => {
     const newRewards = [...sectionRewards];
     newRewards[sectionIndex] = reward;
@@ -349,7 +320,7 @@ const BigSpinWheel = () => {
               <h5 className="mb-0">Dragon Wheel Configuration</h5>
             </Card.Header>
             <Card.Body>
-              <Form.Group className="mb-3">
+              {/* <Form.Group className="mb-3">
                 <Form.Label>Number of Sections</Form.Label>
                 <Form.Control
                   type="number"
@@ -363,29 +334,51 @@ const BigSpinWheel = () => {
                 <Form.Text className="text-muted">
                   Minimum 2, Maximum 10 sections (Rewards Only)
                 </Form.Text>
-              </Form.Group>
+              </Form.Group> */}
 
               <div className="mb-3">
                 <Form.Label>Rewards for Each Section</Form.Label>
                 <div
                   className="row g-2"
-                  style={{ maxHeight: "200px", overflowY: "auto" }}
+                  style={{ maxHeight: "300px", overflowY: "auto" }}
                 >
                   {sectionRewards.map((reward, index) => (
-                    <div key={index} className="col-6">
+                    <div key={index} className="col-12">
                       <Form.Group>
-                        <Form.Label className="small">
-                          Section {index + 1}
-                        </Form.Label>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <Form.Label className="small mb-0">
+                            Section {index + 1}
+                          </Form.Label>
+                          <small
+                            className={`text-${
+                              reward.length >= 15
+                                ? "danger"
+                                : reward.length >= 12
+                                ? "warning"
+                                : "muted"
+                            }`}
+                          >
+                            {reward.length}/15
+                          </small>
+                        </div>
                         <Form.Control
                           type="text"
                           value={reward}
-                          onChange={(e) =>
-                            handleRewardChange(index, e.target.value)
-                          }
+                          onChange={(e) => {
+                            if (e.target.value.length <= 15) {
+                              handleRewardChange(index, e.target.value);
+                            }
+                          }}
                           size="sm"
-                          placeholder="Enter reward"
-                          className="mb-2"
+                          placeholder="Enter reward (max 15 chars)"
+                          className={`mb-2 ${
+                            reward.length >= 15
+                              ? "border-danger"
+                              : reward.length >= 12
+                              ? "border-warning"
+                              : ""
+                          }`}
+                          maxLength={15}
                         />
 
                         {/* Image Upload for Rewards */}
@@ -504,16 +497,6 @@ const BigSpinWheel = () => {
                   Customize rewards for each section individually
                 </Form.Text>
               </div>
-
-              <Alert variant="info" className="mb-3">
-                <div className="d-flex justify-content-between align-items-center">
-                  <div>
-                    <strong>Reward Sections:</strong> {sectionRewards.length}{" "}
-                    configured
-                  </div>
-                  <small className="text-muted">Rewards Only Mode</small>
-                </div>
-              </Alert>
 
               <div className="d-grid gap-2">
                 <Button
