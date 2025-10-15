@@ -2105,6 +2105,46 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
 
     const processedEmployees = [];
 
+    // Pre-validation for all rows before processing
+    const validationErrors = [];
+    for (const row of rawData.filter(r => r.Person)) {
+      const rawEmpCode = row.EmployeeCode || row.emp_code;
+      const rawEmail = row.Email;
+      const personId = parseInt(row.Person);
+
+      const normEmpCode = (rawEmpCode || '').trim();
+      const normEmail = (rawEmail || '').trim().toLowerCase();
+
+      // 1) Validate empCode format: EMP1234 (7 chars)
+      if (!/^EMP\d{4}$/.test(normEmpCode)) {
+        validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'Invalid EMP code format. Expected EMP1234' });
+        continue;
+      }
+
+      // 2) Validate email exists in users
+      const userByEmail = await Users.findOne({ where: { email: normEmail }, attributes: ['id', 'email', 'userCode'], transaction });
+      if (!userByEmail) {
+        validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'User not present for given email' });
+        continue;
+      }
+
+      // 3) Validate empCode is associated with that email in users
+      if ((userByEmail.userCode || '').trim() !== normEmpCode) {
+        validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'EMP Code is not associated with this email' });
+      }
+
+      // 4) Validate person_id-email consistency in existing records
+      const existingByPerson = await EmployeeXpResults.findOne({ where: { person_id: personId }, attributes: ['person_id', 'email'], transaction });
+      if (existingByPerson && (existingByPerson.email || '').trim().toLowerCase() !== normEmail) {
+        validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'Person ID already linked to a different email' });
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: validationErrors });
+    }
+
     for (const row of rawData.filter(r => r.Person)) {
       const empCode = row.EmployeeCode || row.emp_code;
       const email = row.Email;

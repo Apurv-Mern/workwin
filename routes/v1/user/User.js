@@ -375,7 +375,7 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
 
     // Priority 2: Get streak from EmployeeXpResults (attendance-specific data)
     const empXpResult = await EmployeeXpResults.findOne({
-      where: { emp_code: userDetails.userCode },
+      where: { emp_code: userDetails.userCode, email: userDetails.email },
       order: [['week_start_date', 'DESC']]
     });
 
@@ -2217,7 +2217,7 @@ router.get("/global-highscores", userAuthMiddleware, async (req, res) => {
 });
 
 
-// Get how many times the logged-in user played a given game in the last 24 hours
+// Get how many times the logged-in user played a given game in the current day (12 AM to 12 AM cycle)
 router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -2230,14 +2230,24 @@ router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
     }
 
     const now = new Date();
-    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // Get start of current day (12:00 AM)
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    // Get end of current day (11:59:59 PM)
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
 
     const count = await UserXpLog.count({
       where: {
         userId,
         source: 'game',
         type: gameType,
-        createdAt: { [Op.gte]: since }
+        createdAt: {
+          [Op.gte]: startOfDay,
+          [Op.lte]: endOfDay
+        }
       }
     });
 
@@ -2245,7 +2255,12 @@ router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
       HelperUtils.successObj('Play count fetched successfully', {
         gameType,
         count,
-        hasPlayedThreeOrMore: count >= 3
+        hasPlayedThreeOrMore: count >= 3,
+        period: {
+          from: startOfDay.toISOString(),
+          to: endOfDay.toISOString(),
+          description: `Today (${startOfDay.toDateString()})`
+        }
       })
     );
   } catch (error) {
