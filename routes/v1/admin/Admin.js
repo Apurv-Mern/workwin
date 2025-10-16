@@ -809,20 +809,73 @@ router.post("/xp/calculate-daily", adminAuthMiddleware, async (req, res) => {
 // Create a new user
 router.post("/users/create", adminAuthMiddleware, async (req, res) => {
   try {
-    const { firstname, lastname, email, roleId, password, userCode } = req.body;
-    if (!firstname || !lastname || !email || !roleId || !password) {
+    const { firstname, lastname, email, roleId, password, employerCode } = req.body;
+    // Validate firstname
+    if (!firstname) {
       return res
         .status(400)
         .send(
-          HelperUtils.errorObj(
-            "First name, last name, email, role, and password are required"
-          )
+          HelperUtils.errorObj("First name is required")
         );
     }
 
+    // Validate lastname
+    if (!lastname) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Last name is required")
+        );
+    }
+
+    // Validate email
+    if (!email) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Email is required")
+        );
+    }
+
+    // Validate roleId
+    if (!roleId) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Role is required")
+        );
+    }
+
+    // Validate password
+    if (!password) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Password is required")
+        );
+    }
+
+    if (password && password.length < 6) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Password length should be more then 6 character")
+        );
+    }
+
+    if (!employerCode) {
+      return res
+        .status(400)
+        .send(
+          HelperUtils.errorObj("Employer is required")
+        );
+    }
+
+
+
     const existingUser = await Users.findOne({ where: { email } });
     if (existingUser) {
-      return res.status(400).send(HelperUtils.errorObj("User already exists"));
+      return res.status(400).send(HelperUtils.errorObj("User already exist with this email"));
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -855,7 +908,7 @@ router.post("/users/create", adminAuthMiddleware, async (req, res) => {
       email,
       status: "active",
       password: hashedPassword,
-      userCode: userCode || null,
+      userCode: employerCode || null,
       employerCode: randomEmployerCode || null,
     });
     await UserRoles.create({
@@ -937,9 +990,15 @@ router.put("/users/:id", adminAuthMiddleware, async (req, res) => {
     const { name, email, status, roleId } = req.body;
 
     const user = await Users.findByPk(id);
-    if (!user) {
-      return res.status(404).send(HelperUtils.errorObj("User not found"));
+
+    if (user.email === email && user.id != id) {
+      return res.status(404).send(HelperUtils.errorObj("User already exist with this email"));
     }
+
+    if (!user) {
+      return res.status(404).send(HelperUtils.errorObj("User not Found"));
+    }
+
     await user.update({
       name,
       email,
