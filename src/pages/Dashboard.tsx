@@ -1,7 +1,23 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Row, Col, Card } from "react-bootstrap";
+import { useAppDispatch, useAppSelector } from "../hooks/reduxHooks";
+import { fetchUsers } from "../store/slices/userSlice";
+import { toast } from "react-toastify";
 
 const Dashboard: React.FC = () => {
+  const dispatch = useAppDispatch();
+  const { users } = useAppSelector((state: any) => state.users);
+
+  useEffect(() => {
+    dispatch(fetchUsers()).catch(() => toast.error("Failed to load users"));
+  }, [dispatch]);
+
+  const totalUsers = Array.isArray(users) ? users.length : 0;
+  const activeUsers = Array.isArray(users)
+    ? users.filter((u: any) => (u.status || "").toLowerCase() === "active")
+        .length
+    : 0;
+
   return (
     <div>
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -9,7 +25,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       <Row className="g-3 mb-4">
-        <Col sm={6} lg={3}>
+        <Col sm={6} lg={6}>
           <Card className="h-100 shadow-sm">
             <Card.Body className="p-3">
               <div className="d-flex align-items-center mb-2">
@@ -18,18 +34,12 @@ const Dashboard: React.FC = () => {
                 </div>
                 <h6 className="text-uppercase text-muted mb-0">Total Users</h6>
               </div>
-              {/* <h2 className="display-6 mb-0">{stats.totalUsers}</h2> */}
-              <div className="small text-muted mt-2">
-                <span className="text-success">
-                  <i className="bi bi-arrow-up me-1"></i>12%
-                </span>{" "}
-                since last month
-              </div>
+              <h2 className="display-6 mb-0">{totalUsers}</h2>
             </Card.Body>
           </Card>
         </Col>
 
-        <Col sm={6} lg={3}>
+        <Col sm={6} lg={6}>
           <Card className="h-100 shadow-sm">
             <Card.Body className="p-3">
               <div className="d-flex align-items-center mb-2">
@@ -38,18 +48,12 @@ const Dashboard: React.FC = () => {
                 </div>
                 <h6 className="text-uppercase text-muted mb-0">Active Users</h6>
               </div>
-              {/* <h2 className="display-6 mb-0">{stats.activeUsers}</h2> */}
-              <div className="small text-muted mt-2">
-                <span className="text-success">
-                  <i className="bi bi-arrow-up me-1"></i>8%
-                </span>{" "}
-                since last month
-              </div>
+              <h2 className="display-6 mb-0">{activeUsers}</h2>
             </Card.Body>
           </Card>
         </Col>
 
-        <Col sm={6} lg={3}>
+        {/* <Col sm={6} lg={4}>
           <Card className="h-100 shadow-sm">
             <Card.Body className="p-3">
               <div className="d-flex align-items-center mb-2">
@@ -60,203 +64,52 @@ const Dashboard: React.FC = () => {
                   Total Rewards
                 </h6>
               </div>
-              {/* <h2 className="display-6 mb-0">{stats.totalRewards}</h2> */}
-              <div className="small text-muted mt-2">
-                <span className="text-success">
-                  <i className="bi bi-arrow-up me-1"></i>5%
-                </span>{" "}
-                since last month
-              </div>
+              <h2 className="display-6 mb-0">{totalRewards}</h2>
             </Card.Body>
           </Card>
-        </Col>
-
-        <Col sm={6} lg={3}>
-          <Card className="h-100 shadow-sm">
-            <Card.Body className="p-3">
-              <div className="d-flex align-items-center mb-2">
-                <div className="rounded-circle bg-warning bg-opacity-10 p-2 me-3">
-                  <i className="bi bi-trophy fs-4 text-warning"></i>
-                </div>
-                <h6 className="text-uppercase text-muted mb-0">
-                  Rewards Completed
-                </h6>
-              </div>
-              {/* <h2 className="display-6 mb-0">{stats.completedRewards}</h2> */}
-              <div className="small text-muted mt-2">
-                <span className="text-success">
-                  <i className="bi bi-arrow-up me-1"></i>15%
-                </span>{" "}
-                since last month
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
+        </Col> */}
       </Row>
 
-      <Row className="g-4 mb-4">
-        <Col lg={8}>
+      {/* <Row className="g-4 mb-4">
+        <Col lg={12}>
           <Card className="h-100 shadow-sm">
-            <Card.Header className="bg-white d-flex justify-content-between align-items-center p-3">
-              <h5 className="mb-0">User Activity</h5>
-              <div className="d-flex">
-                <div className="btn-group btn-group-sm">
-                  <button className="btn btn-outline-secondary active">
-                    Week
-                  </button>
-                  <button className="btn btn-outline-secondary">Month</button>
-                  <button className="btn btn-outline-secondary">Year</button>
-                </div>
-              </div>
+            <Card.Header className="bg-white p-3 d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">Top Performer</h5>
             </Card.Header>
             <Card.Body>
-              {/* In a real app, this would be a chart component */}
-              <div className="text-center py-5 text-muted">
-                <i className="bi bi-bar-chart-line fs-1 mb-3"></i>
-                <p>User activity chart would be rendered here with real data</p>
-              </div>
+              {topPerformer ? (
+                <div className="d-flex align-items-center">
+                  <div
+                    className="avatar-initial rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3"
+                    style={{ width: "48px", height: "48px" }}
+                  >
+                    {String(topPerformer.name || topPerformer.email || "U")
+                      .trim()
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                  <div className="flex-grow-1">
+                    <div className="fw-bold">
+                      {topPerformer.name || topPerformer.email}
+                    </div>
+                    <div className="small text-muted">Leaderboard</div>
+                  </div>
+                  <div className="text-end">
+                    <Badge bg="primary">
+                      {Number(topPerformer.totalUserXp || 0).toLocaleString()}{" "}
+                      XP
+                    </Badge>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-muted">No performer data available.</div>
+              )}
             </Card.Body>
           </Card>
         </Col>
-
-        <Col lg={4}>
-          <Card className="h-100 shadow-sm">
-            <Card.Header className="bg-white p-3">
-              <h5 className="mb-0">Top Performers</h5>
-            </Card.Header>
-            <Card.Body className="p-0">
-              <ul className="list-group list-group-flush">
-                <li className="list-group-item px-3 py-3">
-                  <div className="d-flex align-items-center">
-                    <div
-                      className="avatar-initial rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3"
-                      style={{ width: "40px", height: "40px" }}
-                    >
-                      JD
-                    </div>
-                    <div className="flex-grow-1">
-                      <div className="fw-bold">John Doe</div>
-                      <div className="small text-muted">
-                        Sales Representative
-                      </div>
-                    </div>
-                    <div className="text-end">
-                      <div className="badge bg-primary">5,240 XP</div>
-                    </div>
-                  </div>
-                </li>
-                <li className="list-group-item px-3 py-3">
-                  <div className="d-flex align-items-center">
-                    <div
-                      className="avatar-initial rounded-circle bg-info text-white d-flex align-items-center justify-content-center me-3"
-                      style={{ width: "40px", height: "40px" }}
-                    >
-                      AJ
-                    </div>
-                    <div className="flex-grow-1">
-                      <div className="fw-bold">Alice Johnson</div>
-                      <div className="small text-muted">Customer Service</div>
-                    </div>
-                    <div className="text-end">
-                      <div className="badge bg-primary">4,890 XP</div>
-                    </div>
-                  </div>
-                </li>
-                <li className="list-group-item px-3 py-3">
-                  <div className="d-flex align-items-center">
-                    <div
-                      className="avatar-initial rounded-circle bg-success text-white d-flex align-items-center justify-content-center me-3"
-                      style={{ width: "40px", height: "40px" }}
-                    >
-                      BS
-                    </div>
-                    <div className="flex-grow-1">
-                      <div className="fw-bold">Bob Smith</div>
-                      <div className="small text-muted">Marketing</div>
-                    </div>
-                    <div className="text-end">
-                      <div className="badge bg-primary">4,230 XP</div>
-                    </div>
-                  </div>
-                </li>
-              </ul>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* {hasFullAccess && (
-        <Row>
-          <Col className="mb-4">
-            <Card className="shadow-sm">
-              <Card.Header className="bg-white p-3">
-                <h5 className="mb-0">KPI Performance Metrics</h5>
-              </Card.Header>
-              <Card.Body>
-                <Row className="g-3">
-                  <Col md={4}>
-                    <Card className="border-0 bg-light">
-                      <Card.Body className="text-center">
-                        <h6 className="mb-2">Sales Target</h6>
-                        <div className="display-6 mb-2">78%</div>
-                        <div className="progress">
-                          <div
-                            className="progress-bar bg-success"
-                            role="progressbar"
-                            style={{ width: "78%" }}
-                            aria-valuenow={78}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                          ></div>
-                        </div>
-                      </Card.Body>
-                    </Card>
-                  </Col>
-                  <Col md={4}>
-                    <Card className="border-0 bg-light">
-                      <Card.Body className="text-center">
-                        <h6 className="mb-2">Customer Satisfaction</h6>
-                        <div className="display-6 mb-2">92%</div>
-                        <div className="progress">
-                          <div
-                            className="progress-bar bg-primary"
-                            role="progressbar"
-                            style={{ width: "92%" }}
-                            aria-valuenow={92}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                          ></div>
-                        </div>
-                      </Card.Body>
-                    </Card>
-                  </Col>
-                  <Col md={4}>
-                    <Card className="border-0 bg-light">
-                      <Card.Body className="text-center">
-                        <h6 className="mb-2">Employee Engagement</h6>
-                        <div className="display-6 mb-2">85%</div>
-                        <div className="progress">
-                          <div
-                            className="progress-bar bg-info"
-                            role="progressbar"
-                            style={{ width: "85%" }}
-                            aria-valuenow={85}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                          ></div>
-                        </div>
-                      </Card.Body>
-                    </Card>
-                  </Col>
-                </Row>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-      )} */}
+      </Row> */}
     </div>
   );
 };
 
 export default Dashboard;
-// Note: The above code is a simplified version of a dashboard component.

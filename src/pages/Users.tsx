@@ -54,6 +54,12 @@ const Users: React.FC = () => {
   const { users, progressReport } = useAppSelector((state: any) => state.users);
   const { hasPermission } = usePermissions();
 
+  // Derive available employers (with employerCode)
+  const employers = (users || []).filter(
+    (u: any) =>
+      u.roles?.some((r: any) => r.name === "Employer") && u.employerCode
+  );
+
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -73,6 +79,10 @@ const Users: React.FC = () => {
     })();
   }, [dispatch]);
 
+  const isSuperAdmin = (user: any) => {
+    return user.roles?.some((role: any) => role.name === "SuperAdmin");
+  };
+
   const handleEdit = (user: any) => {
     setSelectedUser(user);
     setShowEdit(true);
@@ -88,6 +98,11 @@ const Users: React.FC = () => {
     if (createUsers.fulfilled.match(res)) {
       toast.success("User created successfully!");
       dispatch(fetchUsers());
+    } else if (createUsers.rejected.match(res)) {
+      const msg =
+        (res.payload as any)?.message ||
+        String(res.payload ?? "Failed to create user");
+      toast.error(msg);
     }
   };
 
@@ -164,6 +179,7 @@ const Users: React.FC = () => {
           email: row[1] || "",
           password: row[2] || "",
           status: "inactive",
+          empCode: "", // to be selected from dropdown
         }));
       setUploadedUsers(users);
     };
@@ -182,6 +198,12 @@ const Users: React.FC = () => {
     );
   };
 
+  const updateEmpCode = (idx: number, empCode: string) => {
+    setUploadedUsers((users) =>
+      users.map((u, i) => (i === idx ? { ...u, empCode } : u))
+    );
+  };
+
   // Bulk submit handler
   const handleBulkSubmit = async () => {
     const activeUsers = uploadedUsers.filter((u) => u.status === "active");
@@ -189,8 +211,15 @@ const Users: React.FC = () => {
       toast.error("No users marked as active to submit.");
       return;
     }
+    // Ensure all active users have an employer selected
+    const missingEmp = activeUsers.find((u) => !u.empCode);
+    if (missingEmp) {
+      toast.error("Please select Employer for all active users.");
+      return;
+    }
     let successCount = 0;
     let failCount = 0;
+    let res: any = null;
     for (const user of activeUsers) {
       const [firstname, ...rest] = (user.name || "").split(" ");
       const lastname = rest.join(" ");
@@ -200,10 +229,10 @@ const Users: React.FC = () => {
         email: user.email,
         roleId: "4",
         password: String(user.password),
+        employerCode: user.empCode, // send selected empCode
       };
-      console.log({ payload });
       // eslint-disable-next-line no-await-in-loop
-      const res = await dispatch(createUsers(payload));
+      res = await dispatch(createUsers(payload));
       if (createUsers.fulfilled.match(res)) {
         successCount++;
       } else {
@@ -216,7 +245,8 @@ const Users: React.FC = () => {
       dispatch(fetchUsers());
     }
     if (failCount > 0) {
-      toast.error(`${failCount} user(s) failed to create.`);
+      const msg = (res?.payload as string) || "Some users failed to create.";
+      toast.error(`${failCount} user(s) failed to create, ${msg}`);
     }
   };
 
@@ -256,6 +286,7 @@ const Users: React.FC = () => {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Password</th>
+                <th>Employer</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
@@ -266,6 +297,20 @@ const Users: React.FC = () => {
                   <td>{user.name}</td>
                   <td>{user.email}</td>
                   <td>{user.password}</td>
+                  <td style={{ minWidth: 220 }}>
+                    <Form.Select
+                      size="sm"
+                      value={user.empCode || ""}
+                      onChange={(e) => updateEmpCode(idx, e.target.value)}
+                    >
+                      <option value="">Select Employer</option>
+                      {employers.map((emp: any) => (
+                        <option key={emp.id} value={emp.employerCode}>
+                          {emp.name} ({emp.employerCode})
+                        </option>
+                      ))}
+                    </Form.Select>
+                  </td>
                   <td>
                     <Badge bg={user.status === "active" ? "success" : "danger"}>
                       {user.status === "active" ? "Active" : "Inactive"}
@@ -391,7 +436,7 @@ const Users: React.FC = () => {
                       </Button>
                     ) : null
                   )}
-                  {hasPermission("user.delete") && (
+                  {!isSuperAdmin(user) && hasPermission("user.delete") && (
                     <Button
                       variant="outline-danger"
                       size="sm"
