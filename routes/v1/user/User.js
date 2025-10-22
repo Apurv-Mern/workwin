@@ -570,13 +570,7 @@ router.post('/spin-wheel', userAuthMiddleware, async (req, res) => {
     }
 
     // Apply bonus season multiplier if active
-    const activeBonusSeason = await BonusSeason.findOne({
-      where: {
-        start_date: { [Op.lte]: currentDate },
-        end_date: { [Op.gte]: currentDate }
-      },
-      order: [['created_at', 'DESC']]
-    });
+    const activeBonusSeason = await BonusSeason.getActiveSeason(empCode?.userCode);
 
     let finalXpGained = xpGained;
     let bonusMultiplier = 1;
@@ -855,7 +849,7 @@ router.post('/forgot_password', async (req, res) => {
 
     console.log("user find", user);
     if (!user) {
-      return res.status(401).send(HelperUtils.errorObj("data not found"));
+      return res.status(401).send(HelperUtils.errorObj("Email is not registered with us"));
     }
 
     const resetToken = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '15m' });
@@ -998,7 +992,7 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
     // get active season name
-    const season = await BonusSeason.getActiveSeason();
+    const season = await BonusSeason.getActiveSeason(empCode?.userCode);
 
     // Check daily play limit for this specific game
     const todayPlays = await UserXpLog.count({
@@ -1537,7 +1531,7 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
 
     let empCode = await Users.findOne({
       where: { id: userId },
-      attributes: ["userCode"],
+      attributes: ["userCode", "email"],
     });
 
     // Calculate current season based on current month (1-12)
@@ -1561,14 +1555,71 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
 
     // Get user's current attendance record to check game unlock status
     const userAttendance = await EmployeeXpResults.findOne({
-      where: { emp_code: empCode?.userCode },
+      where: { emp_code: empCode?.userCode, email: empCode?.email },
       order: [['week_start_date', 'DESC']],
-      attributes: ['current_streak', 'max_streak', 'total_xp']
+      attributes: ['current_streak', 'max_streak', 'total_xp', 'total_days_present']
     });
+
+    // Get all weekly attendance records for current month to calculate cumulative unlocks
+    const monthlyAttendanceRecords = await EmployeeXpResults.findAll({
+      where: {
+        emp_code: empCode?.userCode,
+        email: empCode?.email,
+        week_start_date: {
+          [Op.gte]: seasonStartDate,
+          [Op.lte]: seasonEndDate
+        }
+      },
+      order: [['week_start_date', 'ASC']],
+      attributes: ['week_start_date', 'week_end_date', 'total_days_present', 'total_xp']
+    });
+
+    console.log('Monthly attendance records:', monthlyAttendanceRecords);
+
+    // Calculate mini-game unlocks based on weekly attendance progression
+    const calculateMiniGameUnlocks = (attendanceRecords) => {
+      let unlockedGamesCount = 0;
+      const weeklyUnlocks = [];
+
+      attendanceRecords.forEach((record, weekIndex) => {
+        // Calculate attendance percentage for this week (out of 7 days)
+        const weeklyAttendancePercent = Math.round((record.total_days_present / 7) * 100);
+
+        // Check if this week qualifies for unlock (25% or more attendance)
+        const weekQualifies = weeklyAttendancePercent >= 25;
+
+        if (weekQualifies && weekIndex < 4) { // Max 4 mini-games (index 0-3)
+          unlockedGamesCount = Math.max(unlockedGamesCount, weekIndex + 1);
+        }
+
+        weeklyUnlocks.push({
+          weekNumber: weekIndex + 1,
+          weekStartDate: record.week_start_date,
+          weekEndDate: record.week_end_date,
+          attendancePercent: weeklyAttendancePercent,
+          totalDaysPresent: record.total_days_present,
+          qualifies: weekQualifies,
+          unlocksGameIndex: weekQualifies ? weekIndex : null
+        });
+      });
+
+      return {
+        totalUnlockedGames: unlockedGamesCount,
+        weeklyBreakdown: weeklyUnlocks
+      };
+    };
+
+    const miniGameUnlockData = calculateMiniGameUnlocks(monthlyAttendanceRecords);
+
+    // Define available mini games based on weekly attendance progression
+    const allMiniGames = [0, 1, 2, 3, 4];
+    const unlockedMiniGames = allMiniGames.slice(0, miniGameUnlockData.totalUnlockedGames);
 
     // Determine spin wheel type and unlock status
     const currentStreak = userAttendance?.current_streak || 0;
     const totalXP = userAttendance?.total_xp || 0;
+    const totalDaysPresent = userAttendance?.total_days_present || 0;
+    const attendancePercent = Math.max(0, Math.min(100, Math.round((totalDaysPresent / 7) * 100)));
 
     // Game unlocks based on streak (multiples of 7)
     const gameUnlocked = currentStreak > 0 && currentStreak % 7 === 0;
@@ -1593,7 +1644,6 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       wheelId = 1;
     }
 
-
     // Get spin wheel configuration based on wheel type
     const wheelConfig = await SpinTheWheel.findOne({
       where: {
@@ -1603,7 +1653,6 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       attributes: ['id', 'number_of_sections', 'sections', 'total_xp_pool', 'reward_images', 'type', 'section_probabilities', 'section_quantities']
     });
 
-
     let spinWheelContents = null;
     if (wheelConfig) {
       const storedSections = JSON.parse(wheelConfig.sections);
@@ -1611,6 +1660,7 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       const wheelType = wheelConfig.type || 'mixed';
       const sectionProbabilities = wheelConfig.section_probabilities || [];
       const sectionQuantities = wheelConfig.section_quantities || [];
+
       // Ensure rewardImages is an array
       if (typeof rewardImages === 'string') {
         try {
@@ -1637,7 +1687,6 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
           : `https://localhost:3008${imagePath}`;
       };
 
-
       // Transform xpValues array into individual objects with additional properties
       const wheelSections = storedSections.map((section, index) => {
         // Determine if this section is XP or Reward based on xpValue type
@@ -1660,29 +1709,13 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
         wheelType: wheelConfig.wheel_type || spinWheelType,
         sections: wheelConfig.number_of_sections,
         totalXP: wheelConfig.total_xp_pool,
-        wheelSections: wheelSections, // New enhanced structure
-        // Keep legacy xpValues for backward compatibility
-        // xpValues: storedSections.map(section => section.xpValue)
+        wheelSections: wheelSections,
       };
     }
-
-    // Define available mini games based on streak/level
-    const allMiniGames = [0, 1, 2, 3, 4];
-    const unlockedMiniGames = allMiniGames.slice(0, currentWeekNumber);
 
     // Unlock seasons based on current month (0-based)
     const allSeasonsArray = Array.from({ length: 12 }, (_, i) => i);
     const seasonUnlocked = allSeasonsArray.slice(0, currentMonth);
-
-    // // Calculate season bonus XP multiplier based on week within month
-    // let bonusSeasonDisplay = 1; // Default multiplier
-    // if (currentWeekNumber === 1) {
-    //   bonusSeasonDisplay = 3; // First week of month bonus
-    // } else if (currentWeekNumber === 2) {
-    //   bonusSeasonDisplay = 2; // Second week bonus
-    // } else if (currentWeekNumber >= totalWeeksInSeason - 1) {
-    //   bonusSeasonDisplay = 4; // Last week of month rush bonus
-    // }
 
     // Get month name for season display
     const monthNames = [
@@ -1701,17 +1734,7 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       durationMonths: null
     };
 
-    const activeBonusSeason = await BonusSeason.findOne({
-      where: {
-        start_date: {
-          [Op.lte]: currentDate
-        },
-        end_date: {
-          [Op.gte]: currentDate
-        }
-      },
-      order: [['created_at', 'DESC']]
-    });
+    const activeBonusSeason = await BonusSeason.getActiveSeason(empCode?.userCode);
 
     if (activeBonusSeason) {
       bonusSeasonInfo = {
@@ -1724,37 +1747,94 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
       };
     }
 
+    // Function to calculate accurate weeks per month that sum to ~52-53 weeks per year
+    const calculateWeeksPerMonth = (year) => {
+      // Find the first Sunday of the year or January 1st if it's already Sunday
+      const jan1 = new Date(year, 0, 1);
+      const firstSunday = new Date(jan1);
+
+      // Adjust to the first Sunday (0 = Sunday, 1 = Monday, etc.)
+      const dayOfWeek = jan1.getDay();
+      if (dayOfWeek !== 0) { // If January 1st is not a Sunday
+        firstSunday.setDate(jan1.getDate() + (7 - dayOfWeek));
+      }
+
+      const weeksPerMonth = Array(12).fill(0);
+      let currentWeekStart = new Date(firstSunday);
+
+      // Calculate total weeks in the year
+      const lastDayOfYear = new Date(year, 11, 31);
+      const totalWeeksInYear = Math.ceil(
+        (lastDayOfYear - firstSunday) / (7 * 24 * 60 * 60 * 1000)
+      ) + 1;
+
+      // Distribute weeks across months
+      for (let weekNum = 0; weekNum < totalWeeksInYear; weekNum++) {
+        // Find which month this week belongs to (based on week start date)
+        const weekMonth = currentWeekStart.getMonth();
+        weeksPerMonth[weekMonth]++;
+
+        // Move to next week
+        currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+
+        // Stop if we've gone into next year
+        if (currentWeekStart.getFullYear() > year) break;
+      }
+
+      return {
+        weeksPerMonth,
+        totalWeeks: weeksPerMonth.reduce((sum, weeks) => sum + weeks, 0),
+        yearInfo: {
+          firstSunday: firstSunday.toISOString().split('T')[0],
+          totalWeeksCalculated: totalWeeksInYear,
+          isLeapYear: (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)
+        }
+      };
+    };
+
+    const yearlyWeekData = calculateWeeksPerMonth(currentYear);
+
     // Prepare response
     const seasonDashboard = {
       // Core season info
       noOfWeeksInCurrentSeason: totalWeeksInSeason,
-      currentSeason: currentSeason, // 1-12 (month number)
+      currentSeason: currentSeason - 1, // 0-11 (month index)
       currentWeek: currentWeekNumber, // 1-5 (week within month)
 
       // Enhanced spin wheel info
       spinTheWheelType: spinWheelType, // 'small', 'medium', 'big'
       spinTheWheelContents: spinWheelContents,
 
-      // Games and bonuses
+      // Games and bonuses - Updated with weekly progression logic
       miniGamesUnlocked: unlockedMiniGames,
-      // miniGamesUnlocked: allMiniGames,
+      miniGameProgress: {
+        totalUnlockedGames: miniGameUnlockData.totalUnlockedGames,
+        maxPossibleGames: Math.min(4, totalWeeksInSeason), // Max 4 games, limited by weeks in month
+        weeklyBreakdown: miniGameUnlockData.weeklyBreakdown,
+        unlockCriteria: "25% weekly attendance required for each game unlock",
+        progressDescription: `Week 1 (25%+) → Game 0, Week 2 (25%+) → Game 1, etc.`
+      },
       seasonUnlocked,
 
       // Bonus season information
       isBonusSeasonActive: !!activeBonusSeason,
       bonusSeason: {
         ...bonusSeasonInfo,
-
       },
 
-      // Additional user context
+      // Additional user context - Enhanced with weekly breakdown
       seasonStats: {
         currentStreak: currentStreak,
         totalXP: totalXP,
         gameUnlocked: gameUnlocked,
+        attendancePercent: attendancePercent,
         weekProgress: `${currentWeekNumber}/${totalWeeksInSeason}`,
         seasonProgress: Math.round((currentWeekNumber / totalWeeksInSeason) * 100),
-        monthProgress: Math.round((currentDay / seasonEndDate.getDate()) * 100)
+        monthProgress: Math.round((currentDay / seasonEndDate.getDate()) * 100),
+        // New weekly attendance tracking
+        weeklyAttendanceData: miniGameUnlockData.weeklyBreakdown,
+        completedWeeks: monthlyAttendanceRecords.length,
+        qualifyingWeeks: miniGameUnlockData.weeklyBreakdown.filter(w => w.qualifies).length
       },
 
       // Season metadata
@@ -1767,7 +1847,22 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
         daysInSeason: seasonEndDate.getDate(),
         currentDay: currentDay,
         isActive: true
-      }
+      },
+
+      // Accurate weeks per month calculation that sums to 52-53 weeks
+      weeksPerMonth: yearlyWeekData.weeksPerMonth,
+      yearlyWeekInfo: {
+        totalWeeksInYear: yearlyWeekData.totalWeeks,
+        firstSundayOfYear: yearlyWeekData.yearInfo.firstSunday,
+        isLeapYear: yearlyWeekData.yearInfo.isLeapYear,
+        weekDistribution: yearlyWeekData.weeksPerMonth.map((weeks, idx) => ({
+          month: monthNames[idx],
+          monthIndex: idx,
+          weeks: weeks,
+          isCurrent: idx === (currentMonth - 1)
+        })),
+        calculation: "Weeks assigned based on Sunday-to-Saturday system starting from first Sunday of the year"
+      },
     };
 
     res.status(200).send(
@@ -1781,6 +1876,8 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     );
   }
 });
+
+
 
 // Helper function to calculate section probability
 const calculateSectionProbability = (totalSections, sectionIndex) => {
@@ -1879,7 +1976,7 @@ router.post('/spin-wheel/award-xp', userAuthMiddleware, async (req, res) => {
     let rewardInfo = null;
 
     // Check for active bonus season
-    const activeBonusSeason = await BonusSeason.getActiveSeason();
+    const activeBonusSeason = await BonusSeason.getActiveSeason(empCode?.userCode);
     if (activeBonusSeason) {
       bonusMultiplier = parseFloat(activeBonusSeason.bonus_multiplier) || 1;
       seasonInfo = {
@@ -2230,6 +2327,26 @@ router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
     }
 
     const now = new Date();
+
+    // Validate today's week attendance == 7 days (100% attendance) before allow playing
+    try {
+      const user = await Users.findByPk(userId, { attributes: ['userCode', "email"] });
+      const empCode = user?.userCode;
+      if (empCode) {
+        const latestAttendance = await EmployeeXpResults.findOne({
+          where: { emp_code: empCode, email: user?.email },
+          order: [['week_start_date', 'DESC']],
+          attributes: ['week_start_date', 'total_days_present']
+        });
+        if (!latestAttendance || (latestAttendance.total_days_present || 0) < 7) {
+          return res.status(403).send(
+            HelperUtils.errorObj('Mini-games are locked. Achieve 100% attendance (7/7 days) for the week to play.')
+          );
+        }
+      }
+    } catch (_) {
+      // If attendance check fails unexpectedly, proceed without blocking
+    }
 
     // Get start of current day (12:00 AM)
     const startOfDay = new Date(now);

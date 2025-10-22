@@ -102,15 +102,17 @@ class BonusSeason extends Model {
     }
 
     // Static methods
-    static async getActiveSeason() {
+    static async getActiveSeason(employerCode = null) {
         const now = new Date();
-        return await this.findOne({
-            where: {
-                is_active: true,
-                start_date: { [require('sequelize').Op.lte]: now },
-                end_date: { [require('sequelize').Op.gte]: now }
-            }
-        });
+        const where = {
+            is_active: true,
+            start_date: { [require('sequelize').Op.lte]: now },
+            end_date: { [require('sequelize').Op.gte]: now }
+        };
+        if (employerCode) {
+            where.employer_code = employerCode;
+        }
+        return await this.findOne({ where });
     }
 
     static async getUpcomingSeasons() {

@@ -809,7 +809,7 @@ router.post("/xp/calculate-daily", adminAuthMiddleware, async (req, res) => {
 // Create a new user
 router.post("/users/create", adminAuthMiddleware, async (req, res) => {
   try {
-    const { firstname, lastname, email, roleId, password, employerCode } = req.body;
+    const { firstname, lastname, email, roleId, password, employerCode, userCode } = req.body;
     // Validate firstname
     if (!firstname) {
       return res
@@ -863,7 +863,7 @@ router.post("/users/create", adminAuthMiddleware, async (req, res) => {
         );
     }
 
-    if (!employerCode) {
+    if (!userCode) {
       return res
         .status(400)
         .send(
@@ -873,7 +873,7 @@ router.post("/users/create", adminAuthMiddleware, async (req, res) => {
 
 
 
-    const existingUser = await Users.findOne({ where: { email } });
+    const existingUser = await Users.findOne({ where: { email, isDeleted: 0 } });
     if (existingUser) {
       return res.status(400).send(HelperUtils.errorObj("User already exist with this email"));
     }
@@ -908,7 +908,7 @@ router.post("/users/create", adminAuthMiddleware, async (req, res) => {
       email,
       status: "active",
       password: hashedPassword,
-      userCode: employerCode || null,
+      userCode: employerCode || userCode,
       employerCode: randomEmployerCode || null,
     });
     await UserRoles.create({
@@ -1040,8 +1040,9 @@ router.delete("/users/:id", adminAuthMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).send(HelperUtils.errorObj("User not found"));
     }
-    console.log({ id });
-    await user.update({ isDeleted: 1 });
+
+    // await user.update({ isDeleted: 1 });
+    await Users.destroy({ where: { id } });
 
     res.status(200).send(HelperUtils.successObj("User deleted successfully"));
   } catch (err) {
@@ -1599,6 +1600,911 @@ router.get(
 );
 
 // Upload Excel File
+// router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), async (req, res) => {
+//   const transaction = await sequelize.transaction();
+
+//   try {
+//     if (!req.file) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "No file uploaded" });
+//     }
+
+//     const filePath = req.file.path;
+//     const workbook = XLSX.readFile(filePath);
+//     const sheetName = workbook.SheetNames[0];
+//     const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+//     const hasValue = (value) => {
+//       return value !== null && value !== undefined && value !== "";
+//     };
+
+//     // Season bonus configuration - based on consecutive perfect weeks
+//     const SEASON_BONUS_CONFIG = {
+//       milestones: [
+//         { perfectWeeks: 1, bonus: 250 },   // 1 perfect week = 250 XP
+//         { perfectWeeks: 2, bonus: 500 },   // 2 consecutive perfect weeks = 500 XP  
+//         { perfectWeeks: 3, bonus: 750 },   // 3 consecutive perfect weeks = 750 XP
+//         { perfectWeeks: 4, bonus: 1000 },  // 4 consecutive perfect weeks = 1000 XP
+//         { perfectWeeks: 5, bonus: 1000 }   // 5 consecutive perfect weeks = 1000 XP
+//       ]
+//     };
+
+//     // Function to calculate season bonus XP based on consecutive perfect weeks
+//     const calculateSeasonBonus = async (empCode, email, currentWeekPerfect, transaction) => {
+//       if (!currentWeekPerfect) {
+//         // If current week is not perfect, no bonus and reset streak
+//         return {
+//           bonusXP: 0,
+//           consecutivePerfectWeeks: 0
+//         };
+//       }
+
+//       // Get all previous records to count consecutive perfect weeks (using both empCode and email)
+//       const previousRecords = await EmployeeXpResults.findAll({
+//         where: {
+//           [Op.and]: [
+//             { emp_code: empCode },
+//             { email: email }
+//           ]
+//         },
+//         order: [["week_start_date", "DESC"]],
+//         attributes: ['total_days_present'],
+//         transaction
+//       });
+
+//       // Count consecutive perfect weeks from most recent backwards
+//       let consecutivePerfectWeeks = 1; // Current week is perfect
+
+//       for (const record of previousRecords) {
+//         if (record.total_days_present === 7) {
+//           consecutivePerfectWeeks++;
+//         } else {
+//           break; // Stop at first non-perfect week
+//         }
+//       }
+
+//       // Find the bonus for current consecutive perfect weeks
+//       let bonusXP = 0;
+//       for (const milestone of SEASON_BONUS_CONFIG.milestones) {
+//         if (consecutivePerfectWeeks >= milestone.perfectWeeks) {
+//           bonusXP = milestone.bonus;
+//         }
+//       }
+
+//       return {
+//         bonusXP: bonusXP,
+//         consecutivePerfectWeeks: consecutivePerfectWeeks
+//       };
+//     };
+
+//     // Updated XP calculation with penalty based on missing days
+//     const calculateXP = (employeeData, multiplier = 1) => {
+//       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+//       const xpPerDay = 2500;
+//       const penaltyPerMissingDay = 1000; // Penalty is 1000 XP per missing day
+//       let baseXP = 0;
+//       let attendanceDetails = {};
+//       let perfectAttendance = true;
+//       let daysPresent = 0;
+//       let daysMissing = 0;
+
+//       days.forEach((day) => {
+//         const inTime = employeeData[`${day}_In`];
+//         const outTime = employeeData[`${day}_Out`];
+
+//         if (hasValue(inTime) && hasValue(outTime)) {
+//           baseXP += xpPerDay;
+//           daysPresent++;
+//           attendanceDetails[day.toLowerCase()] = {
+//             present: true,
+//             hours: employeeData[`${day}_Hours`] || 0
+//           };
+//         } else {
+//           daysMissing++;
+//           attendanceDetails[day.toLowerCase()] = {
+//             present: false,
+//             hours: 0
+//           };
+//           perfectAttendance = false;
+//         }
+//       });
+
+//       // Apply multiplier to base XP
+//       let totalXP = baseXP * multiplier;
+
+//       // Apply penalty: number of missing days * 1000
+//       let penaltyApplied = 0;
+//       if (daysMissing > 0) {
+//         penaltyApplied = daysMissing * penaltyPerMissingDay;
+//         totalXP -= penaltyApplied;
+//       }
+
+//       // Ensure XP cannot be negative - if negative, set to 0
+//       if (totalXP < 0) {
+//         totalXP = 0;
+//       }
+
+//       return {
+//         baseXP,
+//         totalXP,
+//         attendanceDetails,
+//         perfectAttendance,
+//         penaltyApplied: -penaltyApplied, // Show as negative for display purposes
+//         multiplierUsed: multiplier,
+//         daysPresent,
+//         daysMissing
+//       };
+//     };
+
+//     // Function to calculate streak within a week
+//     const calculateCurrentWeekStreak = (attendanceDetails) => {
+//       const daysOrder = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+//       let maxStreak = 0;
+//       let currentStreak = 0;
+
+//       for (const day of daysOrder) {
+//         if (attendanceDetails[day] && attendanceDetails[day].present) {
+//           currentStreak += 1;
+//           maxStreak = Math.max(maxStreak, currentStreak);
+//         } else {
+//           currentStreak = 0;
+//         }
+//       }
+
+//       return maxStreak;
+//     };
+
+//     // Function to calculate overall streak (considering previous weeks)
+//     const calculateOverallStreak = async (empCode, email, currentWeekAttendance, transaction) => {
+//       const currentWeekStreak = calculateCurrentWeekStreak(currentWeekAttendance);
+
+//       // Get the most recent record for this specific employee (using both empCode and email)
+//       const latestRecord = await EmployeeXpResults.findOne({
+//         where: {
+//           [Op.and]: [
+//             { emp_code: empCode },
+//             { email: email }
+//           ]
+//         },
+//         order: [["upload_date", "DESC"]],
+//         transaction
+//       });
+
+//       if (!latestRecord) {
+//         return {
+//           currentStreak: currentWeekStreak,
+//           maxStreak: currentWeekStreak
+//         };
+//       }
+
+//       const previousDaysOrder = ["saturday", "friday", "thursday", "wednesday", "tuesday", "monday", "sunday"];
+//       let lastDayPresent = false;
+
+//       for (const day of previousDaysOrder) {
+//         const dayPresent = latestRecord[`${day}_present`];
+//         if (dayPresent !== null) {
+//           lastDayPresent = dayPresent;
+//           break;
+//         }
+//       }
+
+//       let newCurrentStreak;
+//       if (lastDayPresent && currentWeekAttendance.sun.present) {
+//         newCurrentStreak = latestRecord.current_streak + currentWeekStreak;
+//       } else if (currentWeekStreak > 0) {
+//         newCurrentStreak = currentWeekStreak;
+//       } else {
+//         newCurrentStreak = 0;
+//       }
+
+//       const newMaxStreak = Math.max(latestRecord.max_streak, newCurrentStreak);
+
+//       return {
+//         currentStreak: newCurrentStreak,
+//         maxStreak: newMaxStreak
+//       };
+//     };
+
+//     // Function to update user level and badges based on new XP
+//     const updateUserLevelAndBadges = async (empCode, email, weeklyAttendanceXP, transaction) => {
+//       try {
+//         // Find the user by both employee code AND email for unique identification
+//         const user = await Users.findOne({
+//           where: {
+//             [Op.and]: [
+//               { userCode: empCode },
+//               { email: email }
+//             ]
+//           },
+//           transaction
+//         });
+
+//         if (!user) {
+//           console.warn(`User not found for employee code: ${empCode} and email: ${email}`);
+//           return {
+//             updated: false,
+//             reason: 'User not found'
+//           };
+//         }
+
+//         // Get current total XP from users table (includes XP from all sources: login, registration, spin wheel, etc.)
+//         const currentTotalUserXp = user.totalUserXp || 0;
+
+//         // Add new weekly attendance XP to existing total XP
+//         const newTotalXp = currentTotalUserXp + weeklyAttendanceXP;
+
+//         console.log(`User ${empCode} XP Update: Current: ${currentTotalUserXp}, Weekly Attendance: ${weeklyAttendanceXP}, New Total: ${newTotalXp}`);
+
+//         // Calculate new level based on total XP
+//         const newLevel = xpBadgeSystem.calculateLevel(newTotalXp);
+//         const xpForNext = xpBadgeSystem.getXpForNextLevel(newLevel);
+//         const currentLevelXp = newLevel > 1 ? xpBadgeSystem.getXpForNextLevel(newLevel - 1) : 0;
+//         const progress = newTotalXp >= xpForNext ? 100 : ((newTotalXp - currentLevelXp) / (xpForNext - currentLevelXp)) * 100;
+
+//         // Get badge progress
+//         const badgeProgress = xpBadgeSystem.getBadgeProgress(newTotalXp);
+//         const earnedBadges = xpBadgeSystem.getEarnedBadges(newTotalXp);
+
+//         // Update or create UserLevel record
+//         const [userLevel, created] = await UserLevel.findOrCreate({
+//           where: { userId: user.id },
+//           defaults: {
+//             userId: user.id,
+//             season_id: null, // Global level not tied to specific season
+//             totalXp: newTotalXp,
+//             level: newLevel,
+//             xpForNext: xpForNext,
+//             progress: Math.min(progress, 100),
+//             lastUpdatedAt: new Date()
+//           },
+//           transaction
+//         });
+
+//         if (!created) {
+//           // Update existing record
+//           const oldLevel = userLevel.level;
+//           const leveledUp = newLevel > oldLevel;
+
+//           await userLevel.update({
+//             totalXp: newTotalXp,
+//             level: newLevel,
+//             xpForNext: xpForNext,
+//             progress: Math.min(progress, 100),
+//             lastUpdatedAt: new Date()
+//           }, { transaction });
+
+//           // Update the main users table with new TOTAL XP (adding to existing)
+//           await user.update({
+//             totalUserXp: newTotalXp,
+//             curr_levels: newLevel
+//           }, { transaction });
+
+//           return {
+//             updated: true,
+//             userId: user.id,
+//             empCode: empCode,
+//             oldLevel: oldLevel,
+//             newLevel: newLevel,
+//             leveledUp: leveledUp,
+//             oldTotalXp: currentTotalUserXp,
+//             weeklyXpAdded: weeklyAttendanceXP,
+//             newTotalXp: newTotalXp,
+//             currentBadge: badgeProgress.currentBadge,
+//             earnedBadges: earnedBadges.length,
+//             badgeProgress: badgeProgress.progress,
+//             xpToNextBadge: badgeProgress.xpToNext
+//           };
+//         } else {
+//           // Update the main users table with new TOTAL XP for new user
+//           await user.update({
+//             totalUserXp: newTotalXp,
+//             curr_levels: newLevel
+//           }, { transaction });
+
+//           return {
+//             updated: true,
+//             userId: user.id,
+//             empCode: empCode,
+//             oldLevel: 0,
+//             newLevel: newLevel,
+//             leveledUp: true,
+//             oldTotalXp: currentTotalUserXp,
+//             weeklyXpAdded: weeklyAttendanceXP,
+//             newTotalXp: newTotalXp,
+//             currentBadge: badgeProgress.currentBadge,
+//             earnedBadges: earnedBadges.length,
+//             badgeProgress: badgeProgress.progress,
+//             xpToNextBadge: badgeProgress.xpToNext,
+//             isNewUser: true
+//           };
+//         }
+//       } catch (error) {
+//         console.error(`Error updating user level for ${empCode}:`, error);
+//         return {
+//           updated: false,
+//           reason: error.message
+//         };
+//       }
+//     };
+
+//     // Function to log XP gain for attendance
+//     const logAttendanceXp = async (empCode, email, weeklyXp, seasonBonusXp, weekStartDate, description, transaction) => {
+//       try {
+//         const user = await Users.findOne({
+//           where: {
+//             [Op.and]: [
+//               { userCode: empCode },
+//               { email: email }
+//             ]
+//           },
+//           transaction
+//         });
+
+//         if (!user) return;
+
+//         // Log base attendance XP
+//         if (weeklyXp > 0) {
+//           await UserXpLog.create({
+//             userId: user.id,
+//             season_id: null, // Global attendance XP
+//             source: 'attribute',
+//             type: 'weekly_attendance',
+//             xp: weeklyXp,
+//             date: weekStartDate || new Date().toISOString().split('T')[0],
+//             description: description || `Weekly attendance XP for week starting ${weekStartDate}`
+//           }, { transaction });
+//         }
+
+//         // Log season bonus XP separately if applicable
+//         if (seasonBonusXp > 0) {
+//           await UserXpLog.create({
+//             userId: user.id,
+//             season_id: null, // Global season bonus XP
+//             source: 'attribute',
+//             type: 'season_bonus',
+//             xp: seasonBonusXp,
+//             date: weekStartDate || new Date().toISOString().split('T')[0],
+//             description: `Season bonus XP: ${seasonBonusXp} points for consecutive perfect weeks`
+//           }, { transaction });
+//         }
+//       } catch (error) {
+//         console.error(`Error logging XP for ${empCode}:`, error);
+//       }
+//     };
+
+//     // Function to extract actual week dates from Excel data
+//     const extractWeekDatesFromData = (rawData) => {
+//       // Look for week_start_date and related columns in the first valid row
+//       const firstRowWithWeekData = rawData.find(row =>
+//         row.week_start_date || row.Week_Start_Date || row['Week Start Date'] ||
+//         row.Sun_In || row.Mon_In || row.Tue_In // Also check for attendance date columns
+//       );
+//       if (firstRowWithWeekData) {
+//         // Try to get week_start_date directly from the column
+//         const weekStartRaw = firstRowWithWeekData.week_start_date ||
+//           firstRowWithWeekData.Week_Start_Date ||
+//           firstRowWithWeekData['Week Start Date'];
+
+//         if (weekStartRaw) {
+//           const formatDate = (dateValue) => {
+//             if (!dateValue) return null;
+
+//             // If it's already a date object
+//             if (dateValue instanceof Date) {
+//               const y = dateValue.getFullYear();
+//               const m = String(dateValue.getMonth() + 1).padStart(2, '0');
+//               const d = String(dateValue.getDate()).padStart(2, '0');
+//               // Format using local calendar values to avoid UTC shift
+//               return `${y}-${m}-${d}`;
+//             }
+
+//             // If it's a string in DD-MM-YYYY format (like "28-09-2025 00:00")
+//             if (typeof dateValue === 'string') {
+//               // Handle DD-MM-YYYY HH:MM format
+//               const ddmmyyyyMatch = dateValue.match(/(\d{2})-(\d{2})-(\d{4})/);
+//               if (ddmmyyyyMatch) {
+//                 const [, day, month, year] = ddmmyyyyMatch;
+//                 // Create YYYY-MM-DD string directly without Date object to avoid timezone issues
+//                 const result = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+//                 console.log(`Parsed Excel date: ${dateValue} -> ${result} (direct string conversion, no timezone offset)`);
+//                 return result;
+//               }
+
+//               // Try standard date parsing
+//               const parsed = new Date(dateValue);
+//               if (!isNaN(parsed.getTime())) {
+//                 const y = parsed.getFullYear();
+//                 const m = String(parsed.getMonth() + 1).padStart(2, '0');
+//                 const d = String(parsed.getDate()).padStart(2, '0');
+//                 return `${y}-${m}-${d}`;
+//               }
+//             }
+
+//             // If it's an Excel serial number (common in Excel exports)
+//             if (typeof dateValue === 'number' && dateValue > 40000) {
+//               const excelEpoch = new Date(1900, 0, 1);
+//               const date = new Date(excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000);
+//               const y = date.getFullYear();
+//               const m = String(date.getMonth() + 1).padStart(2, '0');
+//               const d = String(date.getDate()).padStart(2, '0');
+//               return `${y}-${m}-${d}`;
+//             }
+
+//             return null;
+//           };
+
+//           const weekStart = formatDate(weekStartRaw);
+//           if (weekStart) {
+//             // Use the week_start_date from Excel directly - don't recalculate
+//             // The Excel already contains the correct week start date
+//             const startDate = new Date(weekStart);
+//             const weekEnd = new Date(startDate);
+//             weekEnd.setDate(startDate.getDate() + 6);
+
+//             return {
+//               weekStart: weekStart, // Use exactly what's in the Excel
+//               weekEnd: weekEnd.toISOString().split('T')[0],
+//               source: 'excel_data'
+//             };
+//           }
+//         }
+
+//         // Fallback: try to derive from attendance date columns
+//         // Look for Sun_In, Mon_In, etc. columns that contain dates
+//         const attendanceDateColumns = ['Sun_In', 'Mon_In', 'Tue_In', 'Wed_In', 'Thu_In', 'Fri_In', 'Sat_In'];
+
+//         for (const dateCol of attendanceDateColumns) {
+//           const dateValue = firstRowWithWeekData[dateCol];
+//           if (dateValue) {
+//             const formatAttendanceDate = (dateValue) => {
+//               if (!dateValue) return null;
+
+//               // Handle DD-MM-YYYY HH:MM format (like "28-09-2025 05:20")
+//               if (typeof dateValue === 'string') {
+//                 const ddmmyyyyMatch = dateValue.match(/(\d{2})-(\d{2})-(\d{4})/);
+//                 if (ddmmyyyyMatch) {
+//                   const [, day, month, year] = ddmmyyyyMatch;
+//                   // Create date using UTC to avoid timezone conversion issues
+//                   const date = new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
+//                   if (!isNaN(date.getTime())) {
+//                     console.log(`Parsed attendance date: ${dateValue} -> Day: ${date.getUTCDay()} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][date.getUTCDay()]})`);
+//                     return date;
+//                   }
+//                 }
+//               }
+
+//               // Try other formats
+//               if (dateValue instanceof Date) {
+//                 return dateValue;
+//               } else if (typeof dateValue === 'string') {
+//                 const parsed = new Date(dateValue);
+//                 if (!isNaN(parsed.getTime())) {
+//                   return parsed;
+//                 }
+//               } else if (typeof dateValue === 'number' && dateValue > 40000) {
+//                 const excelEpoch = new Date(1900, 0, 1);
+//                 return new Date(excelEpoch.getTime() + (dateValue - 2) * 24 * 60 * 60 * 1000);
+//               }
+
+//               return null;
+//             };
+
+//             const parsedDate = formatAttendanceDate(dateValue);
+//             if (parsedDate) {
+//               console.log(`Processing attendance date: ${dateValue}`);
+//               console.log(`Parsed date: ${parsedDate.toISOString()} (Day of week: ${parsedDate.getDay()} - ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parsedDate.getDay()]})`);
+
+//               // Calculate week start (Sunday) and end (Saturday) from this date using UTC
+//               const weekStart = new Date(parsedDate);
+//               const dayOfWeek = parsedDate.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+//               weekStart.setUTCDate(parsedDate.getUTCDate() - dayOfWeek);
+//               weekStart.setUTCHours(0, 0, 0, 0);
+
+//               const weekEnd = new Date(weekStart);
+//               weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
+//               weekEnd.setUTCHours(23, 59, 59, 999);
+
+//               console.log(`Calculated week start: ${weekStart.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekStart.getUTCDay()]})`);
+//               console.log(`Calculated week end: ${weekEnd.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekEnd.getUTCDay()]})`);
+
+//               return {
+//                 weekStart: weekStart.toISOString().split('T')[0],
+//                 weekEnd: weekEnd.toISOString().split('T')[0],
+//                 source: 'derived_from_attendance_dates'
+//               };
+//             }
+//           }
+//         }
+//       }
+
+//       return null; // Could not extract dates from data
+//     };
+
+//     const weekStartDate = req.body.weekStartDate || null;
+//     const weekEndDate = req.body.weekEndDate || null;
+//     const uploadedBy = req.user?.id || null;
+
+//     // Try to extract actual week dates from Excel data first
+//     const extractedDates = extractWeekDatesFromData(rawData);
+
+//     // Determine final week dates with priority:
+//     // 1. Explicit dates from request body
+//     // 2. Dates extracted from Excel data
+//     // 3. Auto-calculated current week dates (fallback)
+//     let calculatedWeekStart = weekStartDate;
+//     let calculatedWeekEnd = weekEndDate;
+
+//     console.log(calculatedWeekStart, calculatedWeekEnd)
+//     let dateSource = 'manual';
+
+//     if (!weekStartDate || !weekEndDate) {
+//       if (extractedDates) {
+//         calculatedWeekStart = calculatedWeekStart || extractedDates.weekStart;
+//         calculatedWeekEnd = calculatedWeekEnd || extractedDates.weekEnd;
+//         dateSource = extractedDates.source;
+//       } else {
+//         // Fallback to auto-calculated current week dates
+//         const currentDate = new Date();
+
+//         // Calculate current week start (Sunday) and end (Saturday) using UTC
+//         const autoWeekStart = new Date(currentDate);
+//         autoWeekStart.setUTCDate(currentDate.getUTCDate() - currentDate.getUTCDay()); // Set to Sunday using UTC
+//         autoWeekStart.setUTCHours(0, 0, 0, 0);
+
+//         const autoWeekEnd = new Date(autoWeekStart);
+//         autoWeekEnd.setUTCDate(autoWeekStart.getUTCDate() + 6); // Set to Saturday using UTC
+//         autoWeekEnd.setUTCHours(23, 59, 59, 999);
+
+//         // Use auto-calculated dates if not provided
+//         calculatedWeekStart = calculatedWeekStart || autoWeekStart.toISOString().split('T')[0];
+//         calculatedWeekEnd = calculatedWeekEnd || autoWeekEnd.toISOString().split('T')[0];
+//         dateSource = 'auto_calculated';
+//       }
+//     }
+
+//     const processedEmployees = [];
+
+//     // Pre-validation for all rows before processing
+//     const validationErrors = [];
+//     for (const row of rawData.filter(r => r.Person)) {
+//       const rawEmpCode = row.EmployeeCode || row.emp_code;
+//       const rawEmail = row.Email;
+//       const personId = parseInt(row.Person);
+
+//       const normEmpCode = (rawEmpCode || '').trim();
+//       const normEmail = (rawEmail || '').trim().toLowerCase();
+
+//       // 1) Validate empCode format: EMP1234 (7 chars)
+//       if (!/^EMP\d{4}$/.test(normEmpCode)) {
+//         validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'Invalid EMP code format. Expected EMP1234' });
+//         continue;
+//       }
+
+//       // 2) Validate email exists in users
+//       const userByEmail = await Users.findOne({ where: { email: normEmail }, attributes: ['id', 'email', 'userCode'], transaction });
+//       if (!userByEmail) {
+//         validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'User not present for given email' });
+//         continue;
+//       }
+
+//       // 3) Validate empCode is associated with that email in users
+//       if ((userByEmail.userCode || '').trim() !== normEmpCode) {
+//         validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'EMP Code is not associated with this email' });
+//       }
+
+//       // 4) Validate person_id-email consistency in existing records
+//       const existingByPerson = await EmployeeXpResults.findOne({ where: { person_id: personId }, attributes: ['person_id', 'email'], transaction });
+//       if (existingByPerson && (existingByPerson.email || '').trim().toLowerCase() !== normEmail) {
+//         validationErrors.push({ personId, empCode: normEmpCode, email: normEmail, error: 'Person ID already linked to a different email' });
+//       }
+//     }
+
+//     if (validationErrors.length > 0) {
+//       await transaction.rollback();
+//       return res.status(400).json({ success: false, message: 'Validation failed', errors: validationErrors });
+//     }
+
+//     for (const row of rawData.filter(r => r.Person)) {
+//       const empCode = row.EmployeeCode || row.emp_code;
+//       const email = row.Email;
+//       const fullName = `${row.Firstname || ""} ${row.Surname || ""}`.trim();
+
+//       // Normalize identifiers to avoid mismatches due to spaces/case
+//       const normEmpCode = (empCode || '').trim();
+//       const normEmail = (email || '').trim().toLowerCase();
+
+//       // Get the latest record to check for existing data and multiplier (using both empCode and email)
+//       const latestRecord = await EmployeeXpResults.findOne({
+//         where: {
+//           [Op.and]: [
+//             { emp_code: normEmpCode },
+//             { email: normEmail }
+//           ]
+//         },
+//         order: [["upload_date", "DESC"]],
+//         transaction
+//       });
+
+//       // Get multiplier from latest record or default to 1
+//       const currentMultiplier = latestRecord ? latestRecord.multiplier : 1;
+
+//       // Calculate XP with current multiplier
+//       const xpCalculation = calculateXP(row, currentMultiplier);
+
+//       // Check if current week is perfect (all 7 days present)
+//       const currentWeekPerfect = Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length === 7;
+
+//       // Calculate streak (pass email for unique identification)
+//       const streakData = await calculateOverallStreak(normEmpCode, normEmail, xpCalculation.attendanceDetails, transaction);
+
+//       // Calculate season bonus XP based on consecutive perfect weeks (pass email for unique identification)
+//       const seasonBonus = await calculateSeasonBonus(normEmpCode, normEmail, currentWeekPerfect, transaction);
+
+//       // Calculate weekly XP from this file (attendance + bonus)
+//       const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
+
+//       // Compute delta for the same week to prevent double-counting on re-uploads
+//       const recentRecords = await EmployeeXpResults.findAll({
+//         where: {
+//           [Op.and]: [
+//             { emp_code: normEmpCode },
+//             { email: normEmail }
+//           ]
+//         },
+//         order: [["upload_date", "DESC"], ["id", "DESC"]],
+//         limit: 2,
+//         attributes: ["total_xp", "week_start_date"],
+//         transaction
+//       });
+
+//       const latestPrev = recentRecords[0] || null; // most recent cumulative
+//       const prevOfPrev = recentRecords[1] || null; // baseline before most recent
+
+//       const previousCumulativeXP = latestPrev ? (latestPrev.total_xp || 0) : 0;
+//       const previousBaselineXP = prevOfPrev ? (prevOfPrev.total_xp || 0) : 0;
+//       const lastRecordedWeekStart = latestPrev ? latestPrev.week_start_date : null;
+
+//       const lastWeekXPRecorded = (lastRecordedWeekStart && calculatedWeekStart && String(lastRecordedWeekStart) === String(calculatedWeekStart))
+//         ? Math.max(previousCumulativeXP - previousBaselineXP, 0)
+//         : 0;
+
+//       const deltaWeeklyXP = Math.max(weeklyXP - lastWeekXPRecorded, 0);
+//       const cumulativeAttendanceXP = previousCumulativeXP + deltaWeeklyXP; // new cumulative
+
+//       // Update user level and badges with only the delta
+//       const userLevelUpdate = await updateUserLevelAndBadges(normEmpCode, normEmail, deltaWeeklyXP, transaction);
+
+//       // Log only the delta XP (avoid duplicate logs on re-uploads)
+//       if (deltaWeeklyXP > 0) {
+//         const userForLog = await Users.findOne({
+//           where: {
+//             [Op.or]: [
+//               { userCode: normEmpCode },
+//               { email: normEmail }
+//             ]
+//           },
+//           attributes: ["id"],
+//           transaction
+//         });
+//         if (userForLog) {
+//           await UserXpLog.create({
+//             userId: userForLog.id,
+//             season_id: null,
+//             source: 'attribute',
+//             type: 'weekly_attendance',
+//             xp: deltaWeeklyXP,
+//             date: calculatedWeekStart || new Date().toISOString().split('T')[0],
+//             description: `Weekly attendance (delta): +${deltaWeeklyXP} XP for week starting ${calculatedWeekStart}`
+//           }, { transaction });
+//         }
+//       }
+
+//       // Always CREATE a new record (no updates to maintain history)
+//       await EmployeeXpResults.create({
+//         person_id: parseInt(row.Person),
+//         firstname: row.Firstname,
+//         surname: row.Surname,
+//         full_name: fullName,
+//         emp_code: normEmpCode,
+//         email: normEmail,
+//         location: row.locationName,
+//         client: row.ClientName,
+//         total_xp: cumulativeAttendanceXP, // cumulative attendance XP across all weeks
+//         season_bonus_xp: seasonBonus.bonusXP,
+//         season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
+//         current_level: userLevelUpdate.updated ? userLevelUpdate.newLevel : 1, // Include calculated level
+//         multiplier: currentMultiplier,
+//         current_streak: streakData.currentStreak,
+//         max_streak: streakData.maxStreak,
+//         total_days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+//         total_hours: Object.values(xpCalculation.attendanceDetails).reduce((sum, day) => sum + (day.hours || 0), 0),
+//         sunday_present: xpCalculation.attendanceDetails.sun.present,
+//         monday_present: xpCalculation.attendanceDetails.mon.present,
+//         tuesday_present: xpCalculation.attendanceDetails.tue.present,
+//         wednesday_present: xpCalculation.attendanceDetails.wed.present,
+//         thursday_present: xpCalculation.attendanceDetails.thu.present,
+//         friday_present: xpCalculation.attendanceDetails.fri.present,
+//         saturday_present: xpCalculation.attendanceDetails.sat.present,
+//         sunday_hours: xpCalculation.attendanceDetails.sun.hours,
+//         monday_hours: xpCalculation.attendanceDetails.mon.hours,
+//         tuesday_hours: xpCalculation.attendanceDetails.tue.hours,
+//         wednesday_hours: xpCalculation.attendanceDetails.wed.hours,
+//         thursday_hours: xpCalculation.attendanceDetails.thu.hours,
+//         friday_hours: xpCalculation.attendanceDetails.fri.hours,
+//         saturday_hours: xpCalculation.attendanceDetails.sat.hours,
+//         upload_date: new Date(),
+//         week_start_date: calculatedWeekStart,
+//         week_end_date: calculatedWeekEnd,
+//         uploaded_by: uploadedBy
+//       }, { transaction });
+
+//       processedEmployees.push({
+//         emp_code: normEmpCode,
+//         name: fullName,
+//         weekly_xp: xpCalculation.totalXP, // XP earned this week only
+//         season_bonus_earned: seasonBonus.bonusXP,
+//         consecutive_perfect_weeks: seasonBonus.consecutivePerfectWeeks,
+//         current_week_perfect: currentWeekPerfect,
+//         cumulative_attendance_xp: cumulativeAttendanceXP, // Total attendance XP across all weeks
+//         total_user_xp: userLevelUpdate.updated ? userLevelUpdate.newTotalXp : null, // Total XP from all sources
+//         current_streak: streakData.currentStreak,
+//         max_streak: streakData.maxStreak,
+//         // Badge and Level Information
+//         level_update: userLevelUpdate.updated ? {
+//           old_level: userLevelUpdate.oldLevel,
+//           new_level: userLevelUpdate.newLevel,
+//           leveled_up: userLevelUpdate.leveledUp,
+//           old_total_xp: userLevelUpdate.oldTotalXp,
+//           weekly_xp_added: userLevelUpdate.weeklyXpAdded,
+//           new_total_xp: userLevelUpdate.newTotalXp,
+//           current_badge: userLevelUpdate.currentBadge,
+//           earned_badges: userLevelUpdate.earnedBadges,
+//           badge_progress: userLevelUpdate.badgeProgress,
+//           xp_to_next_badge: userLevelUpdate.xpToNextBadge,
+//           is_new_user: userLevelUpdate.isNewUser || false
+//         } : null,
+//         weekly_attendance: {
+//           sunday: xpCalculation.attendanceDetails.sun.present,
+//           monday: xpCalculation.attendanceDetails.mon.present,
+//           tuesday: xpCalculation.attendanceDetails.tue.present,
+//           wednesday: xpCalculation.attendanceDetails.wed.present,
+//           thursday: xpCalculation.attendanceDetails.thu.present,
+//           friday: xpCalculation.attendanceDetails.fri.present,
+//           saturday: xpCalculation.attendanceDetails.sat.present,
+//           days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length
+//         }
+//       });
+//     }
+
+//     await transaction.commit();
+
+//     // Calculate statistics including season bonus
+//     const totalSeasonBonus = processedEmployees.reduce((sum, emp) => sum + emp.season_bonus_earned, 0);
+//     const totalWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp, 0);
+//     const employeesWithPerfectWeek = processedEmployees.filter(emp => emp.current_week_perfect).length;
+//     const employeesWithSeasonBonus = processedEmployees.filter(emp => emp.season_bonus_earned > 0).length;
+
+//     // Badge and Level Statistics
+//     const employeesWhoLeveledUp = processedEmployees.filter(emp => emp.level_update?.leveled_up).length;
+//     const totalNewLevels = processedEmployees.reduce((sum, emp) => {
+//       if (emp.level_update?.leveled_up) {
+//         return sum + (emp.level_update.new_level - emp.level_update.old_level);
+//       }
+//       return sum;
+//     }, 0);
+//     const averageLevel = processedEmployees.reduce((sum, emp) => {
+//       return sum + (emp.level_update?.new_level || 1);
+//     }, 0) / processedEmployees.length;
+//     const highestLevel = Math.max(...processedEmployees.map(emp => emp.level_update?.new_level || 1));
+//     const employeesWithBadgeProgress = processedEmployees.filter(emp =>
+//       emp.level_update?.badge_progress > 0
+//     ).length;
+
+//     // // Send Mail
+//     const transporter = nodemailer.createTransport({
+//       host: config.get("MAIL_HOST"),
+//       port: config.get("MAIL_PORT"),
+//       secure: config.get("MAIL_PROTOCAL"),
+//       auth: {
+//         user: config.get("MAIL_USERNAME"),
+//         pass: config.get("MAIL_PASSWORD")
+//       }
+//     });
+
+//     transporter.sendMail({
+//       from: `WorkWin Support <${config.get("MAIL_FORM")}>`,
+//       to: "apurv.gupta@dotsquares.com",
+//       subject: "WorkWin Attendance Update",
+//       html: `<p>Attendance processed with automatic XP, level, and badge updates</p><p>Total employees: ${processedEmployees.length}</p><p>Total week  ly XP awarded: ${totalWeeklyXP}</p><p>Total season bonus awarded: ${totalSeasonBonus}</p><p>Employees with perfect week: ${employeesWithPerfectWeek}</p><p>Employees with season bonus: ${employeesWithSeasonBonus}</p><p>Week start date: ${calculatedWeekStart}</p><p>Week end date: ${calculatedWeekEnd}</p>`
+//     }).then(() => {
+//       console.log("Email sent successfully");
+//     }).catch((error) => {
+//       console.error("Error sending email:", error);
+//     });
+
+
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Attendance processed with automatic XP, level, and badge updates",
+//       totalEmployees: processedEmployees.length,
+//       weekSummary: {
+//         totalWeeklyXPAwarded: totalWeeklyXP,
+//         totalSeasonBonusAwarded: totalSeasonBonus,
+//         employeesWithPerfectWeek: employeesWithPerfectWeek,
+//         employeesWithSeasonBonus: employeesWithSeasonBonus,
+//         weekStartDate: calculatedWeekStart,
+//         weekEndDate: calculatedWeekEnd,
+//         dateSource: dateSource, // Shows how dates were determined
+//         dateSourceExplanation: {
+//           manual: "Week dates provided in request body",
+//           excel_data: "Week dates extracted from Excel sheet columns",
+//           derived_from_attendance_dates: "Week dates calculated from attendance date columns in Excel",
+//           auto_calculated: "Week dates auto-calculated based on upload time (may be inaccurate for historical data)"
+//         }[dateSource],
+//         datesAutoCalculated: dateSource === 'auto_calculated'
+//       },
+//       badgeAndLevelSummary: {
+//         employeesWhoLeveledUp: employeesWhoLeveledUp,
+//         totalNewLevels: totalNewLevels,
+//         averageLevel: Math.round(averageLevel * 100) / 100,
+//         highestLevel: highestLevel,
+//         employeesWithBadgeProgress: employeesWithBadgeProgress,
+//         badgeSystemActive: true
+//       },
+//       seasonBonusSystem: {
+//         description: "Bonus XP awarded for consecutive perfect weeks (7 days each). Resets when any day is missed.",
+//         milestoneBreakdown: SEASON_BONUS_CONFIG.milestones,
+//         rules: [
+//           "1 perfect week (7 days) = 250 XP",
+//           "2 consecutive perfect weeks (14 days) = 500 XP",
+//           "3 consecutive perfect weeks (21 days) = 750 XP",
+//           "4 consecutive perfect weeks (28 days) = 1000 XP",
+//           "5+ consecutive perfect weeks (35+ days) = 1000 XP",
+//           "Missing any day resets the consecutive count"
+//         ]
+//       },
+//       xpBadgeSystem: {
+//         description: "Dynamic badge system with 10 progressive badges based on total XP",
+//         badges: xpBadgeSystem.getAllBadges().map(badge => ({
+//           name: badge.name,
+//           xpRequired: badge.xpRequired,
+//           description: badge.description
+//         })),
+//         levelFormula: "Level = floor(sqrt(totalXP / 1000)) + 1",
+//         features: [
+//           "Automatic level calculation based on total XP",
+//           "Progressive badge unlocking system",
+//           "Real-time progress tracking",
+//           "Season unlock requirements",
+//           "Integration with /me API for user profiles"
+//         ]
+//       },
+//       xpCalculation: {
+//         formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Perfect Week Bonus >= 0",
+//         description: "Each week creates a new record. Perfect week bonus increases with consecutive perfect weeks. Levels and badges update automatically.",
+//         xpPerDay: 2500,
+//         penaltyPerWeek: -1000,
+//         defaultMultiplier: 1,
+//         perfectWeekBonus: "250-1000 XP based on consecutive perfect weeks"
+//       },
+//       processedEmployees: processedEmployees
+//     });
+
+//   } catch (err) {
+//     if (transaction && !transaction.finished) {
+//       await transaction.rollback();
+//     }
+//     console.error("Error:", err);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to process Excel file and save to database",
+//       error: err.message
+//     });
+//   }
+// });
+
 router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), async (req, res) => {
   const transaction = await sequelize.transaction();
 
@@ -1719,10 +2625,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         totalXP -= penaltyApplied;
       }
 
-      // Ensure XP cannot be negative - if negative, set to 0
-      if (totalXP < 0) {
-        totalXP = 0;
-      }
+      // Weekly XP can be negative (will be handled in cumulative calculation)
+      // Don't set to 0 here - let the cumulative calculation handle it
 
       return {
         baseXP,
@@ -1732,7 +2636,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         penaltyApplied: -penaltyApplied, // Show as negative for display purposes
         multiplierUsed: multiplier,
         daysPresent,
-        daysMissing
+        daysMissing,
+        isNegativeWeek: totalXP < 0 // Flag to indicate if this week resulted in negative XP
       };
     };
 
@@ -1830,8 +2735,8 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         // Get current total XP from users table (includes XP from all sources: login, registration, spin wheel, etc.)
         const currentTotalUserXp = user.totalUserXp || 0;
 
-        // Add new weekly attendance XP to existing total XP
-        const newTotalXp = currentTotalUserXp + weeklyAttendanceXP;
+        // Add new weekly attendance XP to existing total XP (can be negative)
+        const newTotalXp = Math.max(0, currentTotalUserXp + weeklyAttendanceXP); // Ensure never negative
 
         console.log(`User ${empCode} XP Update: Current: ${currentTotalUserXp}, Weekly Attendance: ${weeklyAttendanceXP}, New Total: ${newTotalXp}`);
 
@@ -1873,7 +2778,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
             lastUpdatedAt: new Date()
           }, { transaction });
 
-          // Update the main users table with new TOTAL XP (adding to existing)
+          // Update the main users table with new TOTAL XP
           await user.update({
             totalUserXp: newTotalXp,
             curr_levels: newLevel
@@ -1924,51 +2829,6 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           updated: false,
           reason: error.message
         };
-      }
-    };
-
-    // Function to log XP gain for attendance
-    const logAttendanceXp = async (empCode, email, weeklyXp, seasonBonusXp, weekStartDate, description, transaction) => {
-      try {
-        const user = await Users.findOne({
-          where: {
-            [Op.and]: [
-              { userCode: empCode },
-              { email: email }
-            ]
-          },
-          transaction
-        });
-
-        if (!user) return;
-
-        // Log base attendance XP
-        if (weeklyXp > 0) {
-          await UserXpLog.create({
-            userId: user.id,
-            season_id: null, // Global attendance XP
-            source: 'attribute',
-            type: 'weekly_attendance',
-            xp: weeklyXp,
-            date: weekStartDate || new Date().toISOString().split('T')[0],
-            description: description || `Weekly attendance XP for week starting ${weekStartDate}`
-          }, { transaction });
-        }
-
-        // Log season bonus XP separately if applicable
-        if (seasonBonusXp > 0) {
-          await UserXpLog.create({
-            userId: user.id,
-            season_id: null, // Global season bonus XP
-            source: 'attribute',
-            type: 'season_bonus',
-            xp: seasonBonusXp,
-            date: weekStartDate || new Date().toISOString().split('T')[0],
-            description: `Season bonus XP: ${seasonBonusXp} points for consecutive perfect weeks`
-          }, { transaction });
-        }
-      } catch (error) {
-        console.error(`Error logging XP for ${empCode}:`, error);
       }
     };
 
@@ -2164,6 +3024,51 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
 
     const processedEmployees = [];
 
+    // Check if user has already uploaded today
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    const existingUploadToday = await EmployeeXpResults.findOne({
+      where: {
+        upload_date: today
+      },
+      attributes: ['upload_date'],
+      transaction
+    });
+
+    if (existingUploadToday) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Attendance sheet has already been uploaded today (${today}). You can only upload once per day.`
+      });
+    }
+
+    // Enforce a 7-day cooldown since the last upload
+    const lastUpload = await EmployeeXpResults.findOne({
+      order: [["upload_date", "DESC"]],
+      attributes: ["upload_date"],
+      transaction
+    });
+
+    if (lastUpload && lastUpload.upload_date) {
+      const last = new Date(lastUpload.upload_date);
+      const now = new Date();
+      // Zero-out time components to compare by date
+      last.setHours(0, 0, 0, 0);
+      now.setHours(0, 0, 0, 0);
+      const diffMs = now.getTime() - last.getTime();
+      const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+      if (diffDays < 7) {
+        const nextAllowed = new Date(last);
+        nextAllowed.setDate(nextAllowed.getDate() + 7);
+        const nextAllowedStr = nextAllowed.toISOString().split('T')[0];
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `You can upload attendance only once every 7 days. Next allowed date: ${nextAllowedStr}`
+        });
+      }
+    }
+
     // Pre-validation for all rows before processing
     const validationErrors = [];
     for (const row of rawData.filter(r => r.Person)) {
@@ -2228,7 +3133,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       // Get multiplier from latest record or default to 1
       const currentMultiplier = latestRecord ? latestRecord.multiplier : 1;
 
-      // Calculate XP with current multiplier
+      // Calculate XP with current multiplier (can be negative)
       const xpCalculation = calculateXP(row, currentMultiplier);
 
       // Check if current week is perfect (all 7 days present)
@@ -2237,8 +3142,10 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       // Calculate streak (pass email for unique identification)
       const streakData = await calculateOverallStreak(normEmpCode, normEmail, xpCalculation.attendanceDetails, transaction);
 
-      // Calculate season bonus XP based on consecutive perfect weeks (pass email for unique identification)
-      const seasonBonus = await calculateSeasonBonus(normEmpCode, normEmail, currentWeekPerfect, transaction);
+      // Calculate season bonus XP (only if week is not negative and is perfect)
+      const seasonBonus = xpCalculation.totalXP >= 0 && currentWeekPerfect
+        ? await calculateSeasonBonus(normEmpCode, normEmail, currentWeekPerfect, transaction)
+        : { bonusXP: 0, consecutivePerfectWeeks: 0 };
 
       // Calculate weekly XP from this file (attendance + bonus)
       const weeklyXP = xpCalculation.totalXP + seasonBonus.bonusXP;
@@ -2268,14 +3175,22 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         ? Math.max(previousCumulativeXP - previousBaselineXP, 0)
         : 0;
 
-      const deltaWeeklyXP = Math.max(weeklyXP - lastWeekXPRecorded, 0);
-      const cumulativeAttendanceXP = previousCumulativeXP + deltaWeeklyXP; // new cumulative
+      // Calculate delta (can be negative)
+      const deltaWeeklyXP = weeklyXP - lastWeekXPRecorded;
 
-      // Update user level and badges with only the delta
-      const userLevelUpdate = await updateUserLevelAndBadges(normEmpCode, normEmail, deltaWeeklyXP, transaction);
+      // Calculate new cumulative XP (ensuring it never goes below 0)
+      const newCumulativeXP = Math.max(0, previousCumulativeXP + deltaWeeklyXP);
 
-      // Log only the delta XP (avoid duplicate logs on re-uploads)
-      if (deltaWeeklyXP > 0) {
+      // Calculate actual XP change (what actually gets added/subtracted)
+      const actualXPChange = newCumulativeXP - previousCumulativeXP;
+
+      console.log(`Employee ${normEmpCode}: Weekly XP: ${weeklyXP}, Delta: ${deltaWeeklyXP}, Previous Cumulative: ${previousCumulativeXP}, New Cumulative: ${newCumulativeXP}, Actual Change: ${actualXPChange}`);
+
+      // Update user level and badges with the actual XP change
+      const userLevelUpdate = await updateUserLevelAndBadges(normEmpCode, normEmail, actualXPChange, transaction);
+
+      // Log XP change (can be negative)
+      if (actualXPChange !== 0) {
         const userForLog = await Users.findOne({
           where: {
             [Op.or]: [
@@ -2286,15 +3201,18 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           attributes: ["id"],
           transaction
         });
+
         if (userForLog) {
           await UserXpLog.create({
             userId: userForLog.id,
             season_id: null,
             source: 'attribute',
             type: 'weekly_attendance',
-            xp: deltaWeeklyXP,
+            xp: actualXPChange, // Net change applied to user
             date: calculatedWeekStart || new Date().toISOString().split('T')[0],
-            description: `Weekly attendance (delta): +${deltaWeeklyXP} XP for week starting ${calculatedWeekStart}`
+            description: actualXPChange >= 0
+              ? `Weekly attendance: +${actualXPChange} XP for week starting ${calculatedWeekStart}`
+              : `Weekly attendance penalty: ${actualXPChange} XP for week starting ${calculatedWeekStart} (${xpCalculation.daysMissing} days missed)`
           }, { transaction });
         }
       }
@@ -2309,7 +3227,10 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         email: normEmail,
         location: row.locationName,
         client: row.ClientName,
-        total_xp: cumulativeAttendanceXP, // cumulative attendance XP across all weeks
+        total_xp: newCumulativeXP, // Cumulative XP (never negative)
+        weekly_xp_earned: Math.max(0, weeklyXP), // Positive XP for this week
+        weekly_xp_penalty: Math.min(0, weeklyXP), // Penalty XP for this week (negative or 0)
+        net_weekly_xp: weeklyXP, // Net weekly XP (can be negative)
         season_bonus_xp: seasonBonus.bonusXP,
         season_streak_milestones: seasonBonus.consecutivePerfectWeeks,
         current_level: userLevelUpdate.updated ? userLevelUpdate.newLevel : 1, // Include calculated level
@@ -2335,20 +3256,29 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         upload_date: new Date(),
         week_start_date: calculatedWeekStart,
         week_end_date: calculatedWeekEnd,
-        uploaded_by: uploadedBy
+        uploaded_by: uploadedBy,
+        // Add flags for better tracking
+        is_negative_week: xpCalculation.isNegativeWeek,
+        xp_capped_at_zero: newCumulativeXP === 0 && (previousCumulativeXP + deltaWeeklyXP) < 0
       }, { transaction });
 
       processedEmployees.push({
         emp_code: normEmpCode,
         name: fullName,
-        weekly_xp: xpCalculation.totalXP, // XP earned this week only
+        weekly_xp_gross: weeklyXP, // Gross weekly XP (can be negative)
+        weekly_xp_earned: Math.max(0, weeklyXP), // Only positive earned XP
+        weekly_xp_penalty: Math.min(0, weeklyXP), // Only penalty XP (negative or 0)
+        actual_xp_change: actualXPChange, // What actually got applied
         season_bonus_earned: seasonBonus.bonusXP,
         consecutive_perfect_weeks: seasonBonus.consecutivePerfectWeeks,
         current_week_perfect: currentWeekPerfect,
-        cumulative_attendance_xp: cumulativeAttendanceXP, // Total attendance XP across all weeks
+        cumulative_attendance_xp: newCumulativeXP, // Final cumulative XP (never negative)
+        previous_cumulative_xp: previousCumulativeXP,
         total_user_xp: userLevelUpdate.updated ? userLevelUpdate.newTotalXp : null, // Total XP from all sources
         current_streak: streakData.currentStreak,
         max_streak: streakData.maxStreak,
+        is_negative_week: xpCalculation.isNegativeWeek,
+        xp_capped_at_zero: newCumulativeXP === 0 && (previousCumulativeXP + deltaWeeklyXP) < 0,
         // Badge and Level Information
         level_update: userLevelUpdate.updated ? {
           old_level: userLevelUpdate.oldLevel,
@@ -2371,16 +3301,22 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           thursday: xpCalculation.attendanceDetails.thu.present,
           friday: xpCalculation.attendanceDetails.fri.present,
           saturday: xpCalculation.attendanceDetails.sat.present,
-          days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length
+          days_present: Object.values(xpCalculation.attendanceDetails).filter(day => day.present).length,
+          days_missing: xpCalculation.daysMissing,
+          penalty_applied: Math.abs(xpCalculation.penaltyApplied)
         }
       });
     }
 
     await transaction.commit();
 
-    // Calculate statistics including season bonus
+    // Calculate statistics including negative weeks and penalties
+    const totalPositiveWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp_earned, 0);
+    const totalPenalties = processedEmployees.reduce((sum, emp) => sum + Math.abs(emp.weekly_xp_penalty), 0);
+    const totalNetXPChange = processedEmployees.reduce((sum, emp) => sum + emp.actual_xp_change, 0);
+    const employeesWithNegativeWeeks = processedEmployees.filter(emp => emp.is_negative_week).length;
+    const employeesWithXPCappedAtZero = processedEmployees.filter(emp => emp.xp_capped_at_zero).length;
     const totalSeasonBonus = processedEmployees.reduce((sum, emp) => sum + emp.season_bonus_earned, 0);
-    const totalWeeklyXP = processedEmployees.reduce((sum, emp) => sum + emp.weekly_xp, 0);
     const employeesWithPerfectWeek = processedEmployees.filter(emp => emp.current_week_perfect).length;
     const employeesWithSeasonBonus = processedEmployees.filter(emp => emp.season_bonus_earned > 0).length;
 
@@ -2400,7 +3336,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       emp.level_update?.badge_progress > 0
     ).length;
 
-    // // Send Mail
+    // Send Mail
     const transporter = nodemailer.createTransport({
       host: config.get("MAIL_HOST"),
       port: config.get("MAIL_PORT"),
@@ -2415,27 +3351,29 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
       from: `WorkWin Support <${config.get("MAIL_FORM")}>`,
       to: "apurv.gupta@dotsquares.com",
       subject: "WorkWin Attendance Update",
-      html: `<p>Attendance processed with automatic XP, level, and badge updates</p><p>Total employees: ${processedEmployees.length}</p><p>Total week  ly XP awarded: ${totalWeeklyXP}</p><p>Total season bonus awarded: ${totalSeasonBonus}</p><p>Employees with perfect week: ${employeesWithPerfectWeek}</p><p>Employees with season bonus: ${employeesWithSeasonBonus}</p><p>Week start date: ${calculatedWeekStart}</p><p>Week end date: ${calculatedWeekEnd}</p>`
+      html: `<p>Attendance processed with automatic XP, level, and badge updates</p><p>Total employees: ${processedEmployees.length}</p><p>Total positive weekly XP awarded: ${totalPositiveWeeklyXP}</p><p>Total penalties applied: ${totalPenalties}</p><p>Net XP change: ${totalNetXPChange}</p><p>Total season bonus awarded: ${totalSeasonBonus}</p><p>Employees with perfect week: ${employeesWithPerfectWeek}</p><p>Employees with negative weeks: ${employeesWithNegativeWeeks}</p><p>Employees with XP capped at zero: ${employeesWithXPCappedAtZero}</p><p>Week start date: ${calculatedWeekStart}</p><p>Week end date: ${calculatedWeekEnd}</p>`
     }).then(() => {
       console.log("Email sent successfully");
     }).catch((error) => {
       console.error("Error sending email:", error);
     });
 
-
-
     res.status(200).json({
       success: true,
-      message: "Attendance processed with automatic XP, level, and badge updates",
+      message: "Attendance processed with automatic XP, level, and badge updates (with negative XP handling)",
       totalEmployees: processedEmployees.length,
       weekSummary: {
-        totalWeeklyXPAwarded: totalWeeklyXP,
+        totalPositiveWeeklyXPAwarded: totalPositiveWeeklyXP,
+        totalPenaltiesApplied: totalPenalties,
+        netXPChange: totalNetXPChange,
         totalSeasonBonusAwarded: totalSeasonBonus,
         employeesWithPerfectWeek: employeesWithPerfectWeek,
         employeesWithSeasonBonus: employeesWithSeasonBonus,
+        employeesWithNegativeWeeks: employeesWithNegativeWeeks,
+        employeesWithXPCappedAtZero: employeesWithXPCappedAtZero,
         weekStartDate: calculatedWeekStart,
         weekEndDate: calculatedWeekEnd,
-        dateSource: dateSource, // Shows how dates were determined
+        dateSource: dateSource,
         dateSourceExplanation: {
           manual: "Week dates provided in request body",
           excel_data: "Week dates extracted from Excel sheet columns",
@@ -2453,7 +3391,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
         badgeSystemActive: true
       },
       seasonBonusSystem: {
-        description: "Bonus XP awarded for consecutive perfect weeks (7 days each). Resets when any day is missed.",
+        description: "Bonus XP awarded for consecutive perfect weeks (7 days each). Only awarded for non-negative weeks. Resets when any day is missed.",
         milestoneBreakdown: SEASON_BONUS_CONFIG.milestones,
         rules: [
           "1 perfect week (7 days) = 250 XP",
@@ -2461,7 +3399,23 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           "3 consecutive perfect weeks (21 days) = 750 XP",
           "4 consecutive perfect weeks (28 days) = 1000 XP",
           "5+ consecutive perfect weeks (35+ days) = 1000 XP",
-          "Missing any day resets the consecutive count"
+          "Missing any day resets the consecutive count",
+          "Season bonus only awarded for non-negative weekly XP"
+        ]
+      },
+      negativeXPHandling: {
+        description: "Enhanced XP system that handles negative weekly XP properly",
+        rules: [
+          "Weekly XP can be negative due to penalties (1000 XP per missed day)",
+          "Cumulative XP is never negative - capped at 0",
+          "When negative weekly XP would reduce cumulative XP below 0, it's capped at 0",
+          "Season bonuses are only awarded for perfect weeks with non-negative XP",
+          "User's total XP across all sources is also protected from going negative"
+        ],
+        examples: [
+          "Week 1: 1 day present (2500 XP) - 6 days missed (6000 penalty) = -3500 XP → Cumulative stays at 0",
+          "Week 2: 7 days present (17500 XP) + season bonus = +17750 XP → Cumulative becomes 17750",
+          "Week 3: 2 days present (5000 XP) - 5 days missed (5000 penalty) = 0 XP → Cumulative stays at 17750"
         ]
       },
       xpBadgeSystem: {
@@ -2477,16 +3431,17 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
           "Progressive badge unlocking system",
           "Real-time progress tracking",
           "Season unlock requirements",
-          "Integration with /me API for user profiles"
+          "Integration with /me API for user profiles",
+          "Protection against negative total XP"
         ]
       },
       xpCalculation: {
-        formula: "Cumulative XP = Sum of all previous weeks + ((Base XP × Multiplier) - 1000 penalty) + Perfect Week Bonus >= 0",
-        description: "Each week creates a new record. Perfect week bonus increases with consecutive perfect weeks. Levels and badges update automatically.",
+        formula: "Cumulative XP = max(0, Previous Cumulative + (Weekly XP + Season Bonus))",
+        description: "Each week creates a new record. Cumulative XP never goes negative. Perfect week bonus increases with consecutive perfect weeks. Levels and badges update automatically.",
         xpPerDay: 2500,
-        penaltyPerWeek: -1000,
+        penaltyPerMissingDay: 1000,
         defaultMultiplier: 1,
-        perfectWeekBonus: "250-1000 XP based on consecutive perfect weeks"
+        perfectWeekBonus: "250-1000 XP based on consecutive perfect weeks (only for non-negative weeks)"
       },
       processedEmployees: processedEmployees
     });
@@ -2503,6 +3458,7 @@ router.post("/users/excel-upload", adminAuthMiddleware, upload.single("file"), a
     });
   }
 });
+
 
 // Manual Badge and Level Update API - useful for migration or manual updates
 router.post("/users/update-badges-levels", adminAuthMiddleware, async (req, res) => {
@@ -3390,7 +4346,7 @@ router.delete("/bonus-seasons/:id", adminAuthMiddleware, async (req, res) => {
 // GET /admin/bonus-seasons/active/current - Get currently active bonus season
 router.get("/bonus-seasons/active/current", adminAuthMiddleware, async (req, res) => {
   try {
-    const activeSeason = await BonusSeason.getActiveSeason();
+    const activeSeason = await BonusSeason.getActiveSeason(req.user?.employerCode || null);
 
     if (!activeSeason) {
       return res.status(404).send(
