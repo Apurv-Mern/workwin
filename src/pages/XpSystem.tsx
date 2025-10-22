@@ -75,10 +75,11 @@ const XpSystem = () => {
         );
         toast.success("File uploaded successfully!");
       } else if (PostUsersExcelUploadCode.rejected.match(res)) {
-        toast.error((res.payload as any).errors[0].error);
+        toast.error((res.payload as any).message);
       }
     } catch (error) {
-      toast.error("Upload failed. Please try again.");
+      console.error(error.payload.message);
+      toast.error(error.payload.message || "Upload failed. Please try again.");
     } finally {
       setIsLoading(false);
       event.target.value = "";
