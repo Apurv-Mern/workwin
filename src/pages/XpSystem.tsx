@@ -78,8 +78,9 @@ const XpSystem = () => {
         toast.error((res.payload as any).message);
       }
     } catch (error) {
-      console.error(error.payload.message);
-      toast.error(error.payload.message || "Upload failed. Please try again.");
+      toast.error(
+        (error as any).payload.message || "Upload failed. Please try again."
+      );
     } finally {
       setIsLoading(false);
       event.target.value = "";
