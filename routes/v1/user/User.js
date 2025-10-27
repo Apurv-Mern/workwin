@@ -1748,49 +1748,105 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     }
 
     // Function to calculate accurate weeks per month that sum to ~52-53 weeks per year
+    // Function to calculate accurate weeks per month that sum to ~52-53 weeks per year
     const calculateWeeksPerMonth = (year) => {
-      // Find the first Sunday of the year or January 1st if it's already Sunday
-      const jan1 = new Date(year, 0, 1);
-      const firstSunday = new Date(jan1);
+      console.log(`\n=== Calculating weeks for ${year} ===`);
 
-      // Adjust to the first Sunday (0 = Sunday, 1 = Monday, etc.)
-      const dayOfWeek = jan1.getDay();
-      if (dayOfWeek !== 0) { // If January 1st is not a Sunday
-        firstSunday.setDate(jan1.getDate() + (7 - dayOfWeek));
+      // Find the first Monday of the year
+      const jan1 = new Date(year, 0, 1);
+      let firstMonday = new Date(year, 0, 1);
+
+      // Adjust to the first Monday of the year
+      const jan1Day = jan1.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+      if (jan1Day === 0) { // Sunday
+        firstMonday.setDate(jan1.getDate() + 1);
+      } else if (jan1Day !== 1) { // Not Monday
+        firstMonday.setDate(jan1.getDate() + (8 - jan1Day));
       }
 
       const weeksPerMonth = Array(12).fill(0);
-      let currentWeekStart = new Date(firstSunday);
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
 
-      // Calculate total weeks in the year
-      const lastDayOfYear = new Date(year, 11, 31);
-      const totalWeeksInYear = Math.ceil(
-        (lastDayOfYear - firstSunday) / (7 * 24 * 60 * 60 * 1000)
-      ) + 1;
+      // Start from the first Monday and iterate through all weeks of the year
+      let currentWeekStart = new Date(firstMonday);
+      let weekNumber = 1;
 
-      // Distribute weeks across months
-      for (let weekNum = 0; weekNum < totalWeeksInYear; weekNum++) {
-        // Find which month this week belongs to (based on week start date)
-        const weekMonth = currentWeekStart.getMonth();
-        weeksPerMonth[weekMonth]++;
+      while (currentWeekStart.getFullYear() === year) {
+        const weekEnd = new Date(currentWeekStart);
+        weekEnd.setDate(currentWeekStart.getDate() + 6); // Add 6 days to get Sunday
+
+        // Count days in each month for this week
+        const monthDayCounts = Array(12).fill(0);
+
+        // Check each day of the week (Monday to Sunday)
+        for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+          const currentDay = new Date(currentWeekStart);
+          currentDay.setDate(currentWeekStart.getDate() + dayOffset);
+
+          if (currentDay.getFullYear() === year) {
+            const monthIndex = currentDay.getMonth();
+            monthDayCounts[monthIndex]++;
+          }
+        }
+
+        // Find the month with ≥4 days (majority rule)
+        let assignedMonth = -1;
+        let maxDays = 0;
+
+        monthDayCounts.forEach((dayCount, monthIndex) => {
+          if (dayCount >= 4 && dayCount > maxDays) {
+            maxDays = dayCount;
+            assignedMonth = monthIndex;
+          }
+        });
+
+        // Fallback: if no month has ≥4 days, assign to month with most days
+        if (assignedMonth === -1) {
+          monthDayCounts.forEach((dayCount, monthIndex) => {
+            if (dayCount > maxDays) {
+              maxDays = dayCount;
+              assignedMonth = monthIndex;
+            }
+          });
+        }
+
+        // Assign week to the determined month
+        if (assignedMonth !== -1) {
+          weeksPerMonth[assignedMonth]++;
+
+          // Debug logging for October
+          if (assignedMonth === 9) { // October is month index 9
+            console.log(`Week ${weekNumber}: ${currentWeekStart.toISOString().split('T')[0]} to ${weekEnd.toISOString().split('T')[0]} → October (${maxDays} days)`);
+          }
+        }
 
         // Move to next week
         currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        weekNumber++;
 
-        // Stop if we've gone into next year
-        if (currentWeekStart.getFullYear() > year) break;
+        // Safety break to prevent infinite loop
+        if (weekNumber > 54) break;
       }
+
+      console.log(`October 2025 weeks: ${weeksPerMonth[9]}`);
+      console.log('Weeks per month:', weeksPerMonth);
+      console.log('Total weeks:', weeksPerMonth.reduce((sum, weeks) => sum + weeks, 0));
 
       return {
         weeksPerMonth,
         totalWeeks: weeksPerMonth.reduce((sum, weeks) => sum + weeks, 0),
         yearInfo: {
-          firstSunday: firstSunday.toISOString().split('T')[0],
-          totalWeeksCalculated: totalWeeksInYear,
-          isLeapYear: (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)
+          firstMonday: firstMonday.toISOString().split('T')[0],
+          totalWeeksCalculated: weekNumber - 1,
+          isLeapYear: (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0),
+          weekAssignmentRule: "Week belongs to month if ≥4 days fall within that month"
         }
       };
     };
+
 
     const yearlyWeekData = calculateWeeksPerMonth(currentYear);
 
@@ -1798,7 +1854,7 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     const seasonDashboard = {
       // Core season info
       noOfWeeksInCurrentSeason: totalWeeksInSeason,
-      currentSeason: currentSeason - 1, // 0-11 (month index)
+      currentSeason: currentSeason, // 0-11 (month index)
       currentWeek: currentWeekNumber, // 1-5 (week within month)
 
       // Enhanced spin wheel info
@@ -1876,8 +1932,6 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     );
   }
 });
-
-
 
 // Helper function to calculate section probability
 const calculateSectionProbability = (totalSections, sectionIndex) => {
@@ -2387,6 +2441,8 @@ router.get('/game/play-count', userAuthMiddleware, async (req, res) => {
     );
   }
 });
+
+
 
 module.exports = router;
 

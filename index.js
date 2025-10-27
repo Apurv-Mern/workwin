@@ -24,6 +24,7 @@ if (protcol == "https") {
 };
 
 const { connectToDatabase } = require("./startup/database");
+const GameResetCron = require('./utils/cronjobs');
 connectToDatabase();
 
 // Serve static files from the "uploads" folder
@@ -75,5 +76,9 @@ app.get("/test1", (req, res) => {
 
 const PORT = 3008;
 server.listen(PORT, '0.0.0.0', () => {
+
+    // Initialize Game Reset Cron Job
+    GameResetCron.initialize()
+
     console.log(`Server running on port ${PORT}`);
 });
