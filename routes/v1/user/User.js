@@ -3,7 +3,7 @@ const config = require("config");
 const { sequelize } = require("../../../models");
 const initModels = require("../../../models/init-models");
 const ModelsData = initModels(sequelize);
-const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, XpThreshold } = ModelsData;
+const { Users, Session, Roles, Permissions, UserXpLog, UserLevel, LevelDefinition, Rewards, EmployeeXpResults, SpinTheWheel, BonusSeason, XpThreshold, Season } = ModelsData;
 
 const HelperUtils = require("./../../../utils/helpers");
 const xpBadgeSystem = require("./../../../utils/xpBadgeSystem");
@@ -420,32 +420,82 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
     // Get unlocked seasons
     const unlockedSeasons = xpBadgeSystem.getUnlockedSeasons(totalUserXp, currentLevel);
 
+
     // Get season information
-    const season = await BonusSeason.getActiveSeason();
-    const GetAllSeasonsData = await BonusSeason.findAll();
-
-    userData.seasondata = GetAllSeasonsData.map(entry => {
-      let seasonStatus = "";
-      const seasonName = entry?.name; // Use 'name' from BonusSeason
-      const seasonStartDate = entry?.start_date;
-      const seasonEndDate = entry?.end_date;
-      const seasonStatusValue = entry?.is_active; // Use 'is_active' from BonusSeason
-
-      if (seasonStatusValue) {
-        seasonStatus = "started";
-      } else {
-        seasonStatus = "Not Started";
+    let userSeason = null;
+    const bonusSeason = await BonusSeason.findOne({
+      where: {
+        employer_code: userDetails.userCode,
+        start_date: { [Op.lte]: new Date() },
+        end_date: { [Op.gte]: new Date() },
+        is_active: true
       }
-
-      return {
-        seasonId: entry.id,
-        seasonName,
-        seasonStartDate,
-        seasonEndDate,
-        seasonStatus,
-        isUnlocked: unlockedSeasons.includes(entry.id)
-      };
     });
+    if (bonusSeason) {
+      userSeason = {
+        seasonName: bonusSeason.name,
+        seasonStartDate: bonusSeason.start_date,
+        seasonEndDate: bonusSeason.end_date,
+        seasonStatus: "started"
+
+      };
+    } else {
+      // Get current regular season
+      const currentDate = new Date();
+      const regularSeason = await Season.findOne({
+        where: {
+          start_date: { [Op.lte]: currentDate },
+          end_date: { [Op.gte]: currentDate },
+        }
+      });
+
+      if (regularSeason) {
+        userSeason = {
+          seasonName: regularSeason.seasons_name,
+          seasonStartDate: regularSeason.start_date,
+          seasonEndDate: regularSeason.end_date,
+          seasonStatus: "started"
+        };
+      }
+    }
+    console.log(userSeason)
+    // Add season to user data
+    userData.seasondata = [userSeason] || {
+      seasonId: null,
+      seasonName: 'No Active Season',
+      seasonStartDate: null,
+      seasonEndDate: null,
+      seasonType: 'none',
+      multiplier: 1,
+      description: null,
+      isBonus: false
+    };
+
+    //   const season = await BonusSeason.getActiveSeason();
+    //   const GetAllSeasonsData = await BonusSeason.findAll();
+
+    //   userData.seasondata = GetAllSeasonsData.map(entry => {
+    //     let seasonStatus = "";
+    //     const seasonName = entry?.name; // Use 'name' from BonusSeason
+    //     const seasonStartDate = entry?.start_date;
+    //     const seasonEndDate = entry?.end_date;
+    //     const seasonStatusValue = entry?.is_active; // Use 'is_active' from BonusSeason
+
+    //     if (seasonStatusValue) {
+    //       seasonStatus = "started";
+    //     } else {
+    //       seasonStatus = "Not Started";
+    //     }
+
+    //   return {
+    //     seasonId: entry.id,
+    //     seasonName,
+    //     seasonStartDate,
+    //     seasonEndDate,
+    //     seasonStatus,
+    //     isUnlocked: unlockedSeasons.includes(entry.id)
+    //   };
+    // });
 
     // Add comprehensive XP and badge information
     userData.userStats = {
@@ -459,7 +509,7 @@ router.get('/me', userAuthMiddleware, async (req, res) => {
       earnedBadges: earnedBadges.length,
       totalBadges: xpBadgeSystem.getAllBadges().length,
       unlockedSeasons: unlockedSeasons.length,
-      totalSeasons: GetAllSeasonsData.length,
+      // totalSeasons: GetAllSeasonsData.length,
       // Streak information
       currentStreak: currentStreak,
       currentStreakBadge: currentStreakBadge
@@ -991,6 +1041,8 @@ router.post('/xp/claim-mini-game', userAuthMiddleware, async (req, res) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
+    const userDetails = await Users.findByPk(userId);
+    const empCode = userDetails ? { userCode: userDetails.userCode } : null;
     // get active season name
     const season = await BonusSeason.getActiveSeason(empCode?.userCode);
 
@@ -1752,16 +1804,19 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
     const calculateWeeksPerMonth = (year) => {
       console.log(`\n=== Calculating weeks for ${year} ===`);
 
-      // Find the first Monday of the year
+      // Use ISO 8601 week system - weeks start on Monday
+      // Find the first Monday of the year or last Monday of previous year if Jan 1 is mid-week
       const jan1 = new Date(year, 0, 1);
-      let firstMonday = new Date(year, 0, 1);
+      let weekStartDate = new Date(year, 0, 1);
 
-      // Adjust to the first Monday of the year
+      // Adjust to get the Monday of the week containing January 1
       const jan1Day = jan1.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
-      if (jan1Day === 0) { // Sunday
-        firstMonday.setDate(jan1.getDate() + 1);
-      } else if (jan1Day !== 1) { // Not Monday
-        firstMonday.setDate(jan1.getDate() + (8 - jan1Day));
+      if (jan1Day === 0) { // Sunday - go back to Monday (6 days back)
+        weekStartDate.setDate(jan1.getDate() - 6);
+      } else if (jan1Day === 1) { // Monday - use as is
+        weekStartDate = new Date(jan1);
+      } else { // Tuesday-Saturday - go back to Monday of same week
+        weekStartDate.setDate(jan1.getDate() - (jan1Day - 1));
       }
 
       const weeksPerMonth = Array(12).fill(0);
@@ -1770,16 +1825,17 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
         'July', 'August', 'September', 'October', 'November', 'December'
       ];
 
-      // Start from the first Monday and iterate through all weeks of the year
-      let currentWeekStart = new Date(firstMonday);
+      let currentWeekStart = new Date(weekStartDate);
       let weekNumber = 1;
 
-      while (currentWeekStart.getFullYear() === year) {
+      // Continue until we've processed all weeks that belong to this year
+      while (weekNumber <= 52) { // Maximum possible weeks in a year
         const weekEnd = new Date(currentWeekStart);
         weekEnd.setDate(currentWeekStart.getDate() + 6); // Add 6 days to get Sunday
 
-        // Count days in each month for this week
+        // Count days in each month for this week (only for the target year)
         const monthDayCounts = Array(12).fill(0);
+        let daysInTargetYear = 0;
 
         // Check each day of the week (Monday to Sunday)
         for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
@@ -1789,37 +1845,43 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
           if (currentDay.getFullYear() === year) {
             const monthIndex = currentDay.getMonth();
             monthDayCounts[monthIndex]++;
+            daysInTargetYear++;
           }
         }
 
-        // Find the month with ≥4 days (majority rule)
-        let assignedMonth = -1;
-        let maxDays = 0;
+        // Only process weeks that have at least 1 day in the target year
+        if (daysInTargetYear > 0) {
+          // Find the month with ≥4 days (majority rule)
+          let assignedMonth = -1;
+          let maxDays = 0;
 
-        monthDayCounts.forEach((dayCount, monthIndex) => {
-          if (dayCount >= 4 && dayCount > maxDays) {
-            maxDays = dayCount;
-            assignedMonth = monthIndex;
-          }
-        });
-
-        // Fallback: if no month has ≥4 days, assign to month with most days
-        if (assignedMonth === -1) {
+          // First, try to find a month with at least 4 days
           monthDayCounts.forEach((dayCount, monthIndex) => {
-            if (dayCount > maxDays) {
+            if (dayCount >= 4 && dayCount > maxDays) {
               maxDays = dayCount;
               assignedMonth = monthIndex;
             }
           });
-        }
 
-        // Assign week to the determined month
-        if (assignedMonth !== -1) {
-          weeksPerMonth[assignedMonth]++;
+          // Fallback: if no month has ≥4 days, assign to month with most days
+          if (assignedMonth === -1) {
+            monthDayCounts.forEach((dayCount, monthIndex) => {
+              if (dayCount > maxDays) {
+                maxDays = dayCount;
+                assignedMonth = monthIndex;
+              }
+            });
+          }
 
-          // Debug logging for October
-          if (assignedMonth === 9) { // October is month index 9
-            console.log(`Week ${weekNumber}: ${currentWeekStart.toISOString().split('T')[0]} to ${weekEnd.toISOString().split('T')[0]} → October (${maxDays} days)`);
+          // Assign week to the determined month
+          if (assignedMonth !== -1) {
+            weeksPerMonth[assignedMonth]++;
+
+            // Debug logging for January and December
+            if (assignedMonth === 0 || assignedMonth === 11) {
+              const monthName = monthNames[assignedMonth];
+              console.log(`Week ${weekNumber}: ${currentWeekStart.toISOString().split('T')[0]} to ${weekEnd.toISOString().split('T')[0]} → ${monthName} (${maxDays} days in ${year})`);
+            }
           }
         }
 
@@ -1827,11 +1889,17 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
         currentWeekStart.setDate(currentWeekStart.getDate() + 7);
         weekNumber++;
 
-        // Safety break to prevent infinite loop
-        if (weekNumber > 54) break;
+        // Safety break - stop if we're well into next year
+        if (currentWeekStart.getFullYear() > year && currentWeekStart.getMonth() > 0) {
+          break;
+        }
+
+        // Additional safety break
+        if (weekNumber > 55) break;
       }
 
-      console.log(`October 2025 weeks: ${weeksPerMonth[9]}`);
+      console.log(`January ${year} weeks: ${weeksPerMonth[0]}`);
+      console.log(`December ${year} weeks: ${weeksPerMonth[11]}`);
       console.log('Weeks per month:', weeksPerMonth);
       console.log('Total weeks:', weeksPerMonth.reduce((sum, weeks) => sum + weeks, 0));
 
@@ -1839,13 +1907,14 @@ router.get('/season/dashboard', userAuthMiddleware, async (req, res) => {
         weeksPerMonth,
         totalWeeks: weeksPerMonth.reduce((sum, weeks) => sum + weeks, 0),
         yearInfo: {
-          firstMonday: firstMonday.toISOString().split('T')[0],
+          firstWeekStart: weekStartDate.toISOString().split('T')[0],
           totalWeeksCalculated: weekNumber - 1,
           isLeapYear: (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0),
           weekAssignmentRule: "Week belongs to month if ≥4 days fall within that month"
         }
       };
     };
+
 
 
     const yearlyWeekData = calculateWeeksPerMonth(currentYear);
